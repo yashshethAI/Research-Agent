@@ -1,19 +1,60 @@
 from __future__ import annotations
 
-import json
 import logging
+import re
+from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
-from backend.app.agents.nodes.query_understanding import _extract_json_from_text
-from backend.app.agents.prompts import (
-    GST_RESEARCHER_SYSTEM_PROMPT,
-    RESEARCH_PLANNER_PROMPT,
-)
 from backend.app.agents.state import ResearchState
-from backend.app.llm.factory import llm_factory
 
 logger = logging.getLogger(__name__)
+
+
+def _build_deterministic_research_plan(query: str, facts: dict[str, Any]) -> dict[str, Any]:
+    """Formulates a fast, deterministic statutory research plan from extracted facts and query."""
+    topics = facts.get("gst_topics", [])
+    combined_text = f"{query} {' '.join(topics)}"
+
+    # Detect sections (e.g. Section 16, Sec 16(4))
+    section_matches = re.findall(
+        r"(?:Section|Sec\.?)\s*(\d+[A-Za-z]?(?:\([0-9a-zA-Z]+\))*)",
+        combined_text,
+        re.IGNORECASE,
+    )
+    sections = [f"Section {s}" for s in dict.fromkeys(section_matches)]
+    if not sections:
+        sections = ["Relevant CGST Act provisions"]
+
+    # Detect rules (e.g. Rule 36, Rule 37A)
+    rule_matches = re.findall(
+        r"(?:Rule|R\.)\s*(\d+[A-Za-z]?(?:\([0-9a-zA-Z]+\))*)",
+        combined_text,
+        re.IGNORECASE,
+    )
+    rules = [f"Rule {r}" for r in dict.fromkeys(rule_matches)]
+    if not rules:
+        rules = ["CGST Rules, 2017"]
+
+    # Detect acts
+    acts = ["CGST Act, 2017"]
+    if re.search(r"\bIGST\b|cross[- ]border|inter[- ]state|import|export|place of supply", combined_text, re.IGNORECASE):
+        acts.append("IGST Act, 2017")
+
+    # Formulate high-relevance search intent queries
+    primary_topic = topics[0] if topics else (sections[0] if sections else "GST")
+    intent_queries = [
+        f"{query} site:taxinformation.cbic.gov.in",
+        f"{primary_topic} circular notification CBIC site:cbic.gov.in",
+        f"{primary_topic} Supreme Court High Court GST judgment",
+    ]
+
+    return {
+        "target_acts": acts,
+        "target_sections": sections,
+        "target_rules": rules,
+        "target_circulars_and_notifications": ["Relevant CBIC Circulars & Instructions"],
+        "judicial_precedents": ["Supreme Court of India / High Court Decisions"],
+        "search_intent_queries": intent_queries,
+    }
 
 
 async def research_planner_node(state: ResearchState) -> dict:
@@ -22,50 +63,9 @@ async def research_planner_node(state: ResearchState) -> dict:
         return {"current_step": "research_planner"}
 
     facts = state.extracted_facts
-    assumptions = state.assumptions
+    plan = _build_deterministic_research_plan(state.query, facts)
 
-    if not llm_factory.is_configured():
-        return {"current_step": "research_planner"}
-
-    prompt = RESEARCH_PLANNER_PROMPT.format(
-        facts=json.dumps(facts, indent=2),
-        assumptions=json.dumps(assumptions, indent=2),
-    )
-
-    try:
-        llm = llm_factory.get_chat_model()
-        response = await llm.ainvoke([
-            SystemMessage(content=GST_RESEARCHER_SYSTEM_PROMPT),
-            HumanMessage(content=prompt),
-        ])
-        content_text = response.content if isinstance(response.content, str) else str(response.content)
-        parsed = _extract_json_from_text(content_text)
-
-        research_plan = {
-            "target_acts": parsed.get("target_acts", ["CGST Act, 2017", "IGST Act, 2017"]),
-            "target_sections": parsed.get("target_sections", ["Section 16", "Section 17", "Section 9"]),
-            "target_rules": parsed.get("target_rules", ["CGST Rules, 2017"]),
-            "target_circulars_and_notifications": parsed.get("target_circulars_and_notifications", []),
-            "judicial_precedents": parsed.get("judicial_precedents", []),
-            "search_intent_queries": parsed.get("search_intent_queries", [state.query]),
-        }
-
-        return {
-            "current_step": "research_planner",
-            "research_plan": research_plan,
-        }
-    except Exception as e:
-        logger.error(f"Error in research_planner_node: {e}")
-        # Fallback plan based on query
-        fallback_plan = {
-            "target_acts": ["CGST Act, 2017"],
-            "target_sections": ["Relevant CGST Act provisions"],
-            "target_rules": ["CGST Rules, 2017"],
-            "target_circulars_and_notifications": ["Relevant CBIC Circulars"],
-            "judicial_precedents": ["Supreme Court / High Court Rulings"],
-            "search_intent_queries": [state.query],
-        }
-        return {
-            "current_step": "research_planner",
-            "research_plan": fallback_plan,
-        }
+    return {
+        "current_step": "research_planner",
+        "research_plan": plan,
+    }

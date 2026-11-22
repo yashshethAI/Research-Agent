@@ -34,12 +34,12 @@ async def evidence_compiler_node(state: ResearchState) -> dict:
     evidence_records: list[dict[str, Any]] = []
 
     for idx, doc in enumerate(parsed_docs, start=1):
-        url = doc.get("url", "")
+        url = doc.get("url") or ""
         domain = urlparse(url).hostname or ""
-        text = doc.get("text", "")
+        text = doc.get("text") or ""
         title = doc.get("title") or f"Official GST Document {idx}"
         authority = _identify_authority(domain)
-        sha_hash = doc.get("sha256_hash", "")
+        sha_hash = doc.get("sha256_hash") or ""
 
         # Detect statutory references in text
         sections_found = re.findall(r"Section\s+\d+(?:\([0-9a-zA-Z]+\))*", text, flags=re.IGNORECASE)

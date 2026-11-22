@@ -4,6 +4,7 @@ import json
 import logging
 import uuid
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -15,6 +16,23 @@ from backend.app.schemas.api import ChatRequest, ChatResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["Chat"])
+
+
+NODE_STEP_LABELS: dict[str, str] = {
+    "load_conversation": "Loaded conversation history",
+    "query_understanding": "Parsed GST topics, tax periods, and material facts",
+    "fact_extraction": "Consolidated material facts and assumptions",
+    "research_planner": "Formulated statutory lookup & authority plan",
+    "search_query_generation": "Generated sanitized official search queries",
+    "official_source_search": "Queried official CBIC / GST portal registries",
+    "source_fetcher": "Safely retrieved official statutory documents",
+    "document_extractor": "Extracted statutory provisions and circular texts",
+    "evidence_compiler": "Indexed and structured legal evidence records",
+    "legal_analysis": "Completed date-aware statutory legal analysis",
+    "citation_validator": "Audited citations against official sources",
+    "answer_generator": "Synthesized 12-section GST Research Memorandum",
+    "persistence_node": "Persisted session artifacts to local storage",
+}
 
 
 @router.post("", response_model=ChatResponse)
@@ -71,25 +89,42 @@ async def chat_stream_endpoint(request: ChatRequest) -> StreamingResponse:
             # Emit start event
             yield f"data: {json.dumps({'event': 'started', 'conversation_id': conv_id, 'research_id': res_id})}\n\n"
 
-            # Stream intermediate node steps
-            final_output = None
+            # Stream intermediate node steps and track accumulated outputs
+            final_report = ""
+            evidence_records: list[dict[str, Any]] = []
+            citations: list[dict[str, Any]] = []
+            needs_clarification = False
+
             async for event in gst_research_graph.astream(initial_state, stream_mode="updates"):
                 for node_name, node_output in event.items():
+                    if isinstance(node_output, dict):
+                        if node_output.get("final_report"):
+                            final_report = node_output["final_report"]
+                        if node_output.get("evidence_records"):
+                            evidence_records = node_output["evidence_records"]
+                        if node_output.get("citation_validation"):
+                            citations = node_output["citation_validation"].get("verified_citations", [])
+                        if "needs_clarification" in node_output:
+                            needs_clarification = node_output["needs_clarification"]
+
+                    step_label = NODE_STEP_LABELS.get(node_name, f"Completed node: {node_name}")
                     step_event = {
                         "event": "step",
                         "node": node_name,
+                        "label": step_label,
                         "status": "completed",
                     }
                     yield f"data: {json.dumps(step_event)}\n\n"
-                    final_output = node_output
 
-            # After full graph execution, retrieve full state
-            # Run persistence check
+            # After full graph execution, emit complete event with full response
             complete_event = {
                 "event": "complete",
                 "conversation_id": conv_id,
                 "research_id": res_id,
-                "answer": final_output.get("final_report") if isinstance(final_output, dict) else "",
+                "answer": final_report,
+                "evidence": evidence_records,
+                "citations": citations,
+                "needs_clarification": needs_clarification,
             }
             yield f"data: {json.dumps(complete_event)}\n\n"
 

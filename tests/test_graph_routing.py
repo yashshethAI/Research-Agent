@@ -8,6 +8,7 @@ from backend.app.agents.graph import (
     route_after_fact_extraction,
 )
 from backend.app.agents.state import ResearchState
+from backend.app.llm.factory import llm_factory
 
 
 def test_routing_after_fact_extraction():
@@ -30,7 +31,8 @@ def test_routing_after_citation_validator():
 
 
 @pytest.mark.asyncio
-async def test_graph_execution_unconfigured_llm():
+async def test_graph_execution_unconfigured_llm(monkeypatch):
+    monkeypatch.setattr(llm_factory, "is_configured", lambda: False)
     # When LLM is unconfigured, graph must complete smoothly and return guidance
     state = ResearchState(
         conversation_id="conv-unconfig-test",

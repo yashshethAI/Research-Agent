@@ -11,5 +11,7 @@ if [ -d ".venv" ]; then
     source .venv/bin/activate
 fi
 
+export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
+
 echo "🚀 Starting GST Practice Copilot Backend on http://127.0.0.1:8000..."
 exec uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload

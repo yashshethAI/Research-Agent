@@ -11,5 +11,7 @@ if [ -d ".venv" ]; then
     source .venv/bin/activate
 fi
 
+export PYTHONPATH="${ROOT_DIR}:${PYTHONPATH:-}"
+
 echo "⚖️ Starting GST Practice Copilot Streamlit UI on http://localhost:8501..."
 exec streamlit run frontend/app.py --server.port 8501 --server.headless false

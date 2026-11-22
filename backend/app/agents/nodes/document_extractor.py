@@ -36,7 +36,7 @@ async def document_extractor_node(state: ResearchState) -> dict:
             parsed_docs.append({
                 "url": url,
                 "title": extracted.get("title") or url,
-                "text": extracted.get("text", "")[:40000],  # Guard against massive token overflow
+                "text": (extracted.get("text") or "")[:40000],  # Guard against massive token overflow
                 "doc_type": doc_type,
                 "sha256_hash": sha_hash,
                 "page_count": extracted.get("page_count", 1),
@@ -50,7 +50,7 @@ async def document_extractor_node(state: ResearchState) -> dict:
             parsed_docs.append({
                 "url": res.get("url", ""),
                 "title": res.get("title", ""),
-                "text": res.get("snippet", ""),
+                "text": res.get("snippet") or "",
                 "doc_type": "Official Search Record",
                 "sha256_hash": f"snippet-hash-{idx}",
                 "page_count": 1,

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -79,11 +81,39 @@ class BackendAPIClient:
             "stream": False,
             "attachment_ids": attachment_ids or [],
         }
-        with httpx.Client(timeout=180) as client:
+        with httpx.Client(timeout=360) as client:
             resp = client.post(f"{self.base_url}/api/v1/chat", json=payload)
             if resp.status_code == 200:
                 return resp.json()
             raise RuntimeError(f"Backend error ({resp.status_code}): {resp.text}")
+
+    def stream_chat(
+        self,
+        query: str,
+        conversation_id: str | None = None,
+        user_role: str = "Professional",
+        attachment_ids: list[str] | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Streams real-time research events and final answer via Server-Sent Events (SSE)."""
+        payload = {
+            "query": query,
+            "conversation_id": conversation_id,
+            "user_role": user_role,
+            "stream": True,
+            "attachment_ids": attachment_ids or [],
+        }
+        with httpx.Client(timeout=360) as client:
+            with client.stream("POST", f"{self.base_url}/api/v1/chat/stream", json=payload) as response:
+                if response.status_code != 200:
+                    raise RuntimeError(f"Backend streaming error ({response.status_code}): {response.text}")
+                for line in response.iter_lines():
+                    if line.startswith("data: "):
+                        raw_json = line[6:].strip()
+                        if raw_json:
+                            try:
+                                yield json.loads(raw_json)
+                            except json.JSONDecodeError:
+                                pass
 
     def upload_document(self, filename: str, content: bytes) -> dict[str, Any]:
         files = {"file": (filename, content)}

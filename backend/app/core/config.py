@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "openai_compatible"
     LLM_BASE_URL: str | None = None
     LLM_API_KEY: str | None = None
+    LLM_BASIC_AUTH_USERNAME: str | None = None
+    LLM_BASIC_AUTH_PASSWORD: str | None = None
     LLM_MODEL: str | None = None
     LLM_TEMPERATURE: float = 0.0
     LLM_TIMEOUT: int = 180

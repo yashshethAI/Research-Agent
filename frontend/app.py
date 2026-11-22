@@ -1,12 +1,24 @@
 from __future__ import annotations
 
+import sys
 import uuid
+from pathlib import Path
 
 import streamlit as st
 
-from frontend.components.evidence_panel import render_evidence_panel
-from frontend.components.sidebar import render_sidebar
-from frontend.services.api_client import api_client
+# Ensure project root is in sys.path regardless of execution directory
+root_dir = Path(__file__).resolve().parent.parent
+if str(root_dir) not in sys.path:
+    sys.path.insert(0, str(root_dir))
+
+try:
+    from frontend.components.evidence_panel import render_evidence_panel
+    from frontend.components.sidebar import render_sidebar
+    from frontend.services.api_client import api_client
+except ModuleNotFoundError:
+    from components.evidence_panel import render_evidence_panel
+    from components.sidebar import render_sidebar
+    from services.api_client import api_client
 
 # Page Configuration
 st.set_page_config(
@@ -187,26 +199,64 @@ if user_prompt:
         "metadata": {"user_role": active_role},
     })
 
-    # 2. Execute research through backend
+    # 2. Execute research through backend with real-time SSE streaming
     with st.chat_message("assistant"):
-        with st.status("🔍 Conducting GST Legal Research...", expanded=True) as status_box:
-            st.write("📋 **Node 1-3:** Parsing GST topics, tax periods, and material facts...")
-            st.write("📑 **Node 4-6:** Planning statutory lookups & searching official CBIC/GST portals...")
-            st.write("📥 **Node 7-9:** Safely retrieving official documents and compiling evidence...")
-            st.write("⚖️ **Node 10-11:** Conducting date-aware legal analysis and citation auditing...")
-            st.write("✍️ **Node 12-13:** Synthesizing professional 12-section GST memorandum...")
+        with st.status("🔍 Initializing GST Legal Research Engine...", expanded=True) as status_box:
+            completed_nodes: set[str] = set()
+            answer_text = ""
+            evidence_list: list[dict] = []
+            research_id = None
+            needs_clarification = False
 
             try:
-                response = api_client.send_chat(
+                for event_data in api_client.stream_chat(
                     query=user_prompt,
                     conversation_id=st.session_state.conversation_id,
                     user_role=active_role,
                     attachment_ids=st.session_state.uploaded_attachment_ids,
-                )
-                status_box.update(label="✅ Legal Research Memorandum Completed", state="complete", expanded=False)
+                ):
+                    event_type = event_data.get("event")
 
-                answer_text = response.get("answer", "")
-                evidence_list = response.get("evidence", [])
+                    if event_type == "started":
+                        status_box.update(label="🚀 GST Legal Research Pipeline Active...", state="running")
+
+                    elif event_type == "step":
+                        node = event_data.get("node", "")
+                        label = event_data.get("label", node)
+                        if node not in completed_nodes:
+                            completed_nodes.add(node)
+                            # Render milestone updates with clear badges
+                            if node in ("query_understanding", "fact_extraction"):
+                                st.write(f"📋 **Stage 1/5:** {label}")
+                                status_box.update(label=f"🔍 Stage 1/5: {label}...")
+                            elif node in ("research_planner", "search_query_generation", "official_source_search"):
+                                st.write(f"📑 **Stage 2/5:** {label}")
+                                status_box.update(label=f"🌐 Stage 2/5: {label}...")
+                            elif node in ("source_fetcher", "document_extractor", "evidence_compiler"):
+                                st.write(f"📥 **Stage 3/5:** {label}")
+                                status_box.update(label=f"📜 Stage 3/5: {label}...")
+                            elif node in ("legal_analysis", "citation_validator"):
+                                st.write(f"⚖️ **Stage 4/5:** {label}")
+                                status_box.update(label=f"⚖️ Stage 4/5: {label}...")
+                            elif node in ("answer_generator", "persistence_node"):
+                                st.write(f"✍️ **Stage 5/5:** {label}")
+                                status_box.update(label=f"✍️ Stage 5/5: {label}...")
+
+                    elif event_type == "complete":
+                        answer_text = event_data.get("answer", "")
+                        evidence_list = event_data.get("evidence", [])
+                        research_id = event_data.get("research_id")
+                        needs_clarification = event_data.get("needs_clarification", False)
+                        status_box.update(label="✅ Legal Research Memorandum Completed", state="complete", expanded=False)
+
+                    elif event_type == "error":
+                        raise RuntimeError(event_data.get("detail", "Unknown error during streaming"))
+
+                if not answer_text:
+                    # Fallback if streaming ended without answer
+                    resp = api_client.get_conversation(st.session_state.conversation_id)
+                    if resp and resp[-1].get("role") == "assistant":
+                        answer_text = resp[-1].get("content", "")
 
                 st.markdown(answer_text)
 
@@ -218,9 +268,9 @@ if user_prompt:
                     "role": "assistant",
                     "content": answer_text,
                     "metadata": {
-                        "research_id": response.get("research_id"),
+                        "research_id": research_id,
                         "evidence": evidence_list,
-                        "needs_clarification": response.get("needs_clarification", False),
+                        "needs_clarification": needs_clarification,
                     },
                 })
 

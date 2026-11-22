@@ -63,7 +63,24 @@ class SafeFetcher:
                 # Re-validate before each hop
                 source_validator.assert_valid_url(current_url)
 
-                resp = await client.get(current_url, headers=headers)
+                try:
+                    resp = await client.get(current_url, headers=headers)
+                except httpx.ConnectError as e:
+                    # Many Indian official portals (CBIC/eCourts) use Indian NIC/CCA certificates
+                    # not present in standard Linux certifi stores.
+                    if "CERTIFICATE_VERIFY_FAILED" in str(e) and (
+                        "gov.in" in current_url or "nic.in" in current_url
+                    ):
+                        logger.warning(
+                            f"SSL verify failed for official government portal '{current_url}'. "
+                            "Retrying with relaxed SSL verify for approved official domain."
+                        )
+                        async with httpx.AsyncClient(
+                            timeout=self.timeout, follow_redirects=False, verify=False
+                        ) as fallback_client:
+                            resp = await fallback_client.get(current_url, headers=headers)
+                    else:
+                        raise
 
                 if resp.status_code in (301, 302, 303, 307, 308):
                     redirect_count += 1

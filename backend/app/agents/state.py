@@ -23,7 +23,7 @@ class ResearchState(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     missing_facts: list[str] = Field(default_factory=list)
     needs_clarification: bool = False
-    clarification_prompt: str = ""
+    clarification_prompt: str | None = None
 
     # Research planning & execution
     research_plan: dict[str, Any] = Field(default_factory=dict)

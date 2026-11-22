@@ -5,12 +5,6 @@ import logging
 import re
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
-from backend.app.agents.prompts import (
-    GST_RESEARCHER_SYSTEM_PROMPT,
-    QUERY_UNDERSTANDING_PROMPT,
-)
 from backend.app.agents.state import ResearchState
 from backend.app.llm.factory import llm_factory
 
@@ -34,29 +28,67 @@ def _extract_json_from_text(text: str) -> dict[str, Any]:
     return {}
 
 
+def _extract_facts_heuristically(query: str) -> dict[str, Any]:
+    """Fast, deterministic extraction of GST topics, provisions, and factual context."""
+    topics: list[str] = []
+
+    # Detect provisions
+    sections = re.findall(r"(?:Section|Sec\.?)\s*(\d+[A-Za-z]?(?:\([0-9a-zA-Z]+\))*)", query, re.IGNORECASE)
+    rules = re.findall(r"(?:Rule|R\.)\s*(\d+[A-Za-z]?(?:\([0-9a-zA-Z]+\))*)", query, re.IGNORECASE)
+
+    for s in sections:
+        topics.append(f"Section {s}")
+    for r in rules:
+        topics.append(f"Rule {r}")
+
+    q_lower = query.lower()
+    if "itc" in q_lower or "input tax credit" in q_lower:
+        topics.append("Input Tax Credit (ITC)")
+    if "rcm" in q_lower or "reverse charge" in q_lower:
+        topics.append("Reverse Charge Mechanism (RCM)")
+    if "place of supply" in q_lower or "cross-border" in q_lower or "export" in q_lower or "import" in q_lower:
+        topics.append("Place of Supply (IGST)")
+    if "audit" in q_lower or "scn" in q_lower or "show cause" in q_lower or "73" in q_lower or "74" in q_lower:
+        topics.append("Demands, Audit & Penalties")
+    if "remuneration" in q_lower or "director" in q_lower:
+        topics.append("Director Remuneration & Levy")
+    if "invoice" in q_lower or "e-way" in q_lower or "eway" in q_lower:
+        topics.append("Invoicing & E-Way Bill Compliance")
+
+    if not topics:
+        topics = ["General GST Advisory"]
+
+    # Detect FY
+    fy_match = re.search(r"\b(FY\s*)?20\d{2}[-–/]\d{2,4}\b", query, re.IGNORECASE)
+    fy = fy_match.group(0) if fy_match else "Current Applicable Period"
+
+    return {
+        "gst_topics": list(dict.fromkeys(topics)),
+        "financial_year": fy,
+        "tax_period": "Current Statutory Period",
+        "jurisdiction": "Central / All India (CGST/IGST)",
+        "taxpayer_type": "Regular Registered Taxable Person",
+        "nature_of_supply": "Standard Taxable Supply",
+        "material_facts": [query],
+    }
+
+
 async def query_understanding_node(state: ResearchState) -> dict:
-    """Node 2: Classifies multi-topic GST question, tax period, transaction date, and role."""
+    """Node 2: Fast, deterministic extraction of GST topics, statutory provisions, and tax facts."""
     query = state.query
 
-    # If LLM is not configured, prepare guidance for unconfigured mode
+    # 1. Check if LLM endpoint is configured
     if not llm_factory.is_configured():
-        logger.warning("LLM endpoint not configured. Generating CA-styled setup guidance.")
         guidance = (
-            "### ⚖️ GST PRACTICE COPILOT — RUNTIME INFERENCE SETUP REQUIRED\n\n"
-            "Welcome to **GST Practice Copilot (India)**. The application runtime has initialized successfully in local-first mode.\n\n"
-            "To perform live statutory GST research, date-aware legal analysis, and official CBIC/GSTN citation verification, "
-            "an **OpenAI-compatible inference endpoint** (such as **Ollama**, **vLLM**, **llama.cpp**, or a private cloud endpoint) must be connected.\n\n"
-            "#### How to Configure Your Local LLM Endpoint:\n"
-            "1. Open your project `.env` file in the root workspace.\n"
-            "2. Configure the following parameters:\n"
-            "   ```env\n"
-            "   # For Ollama running locally:\n"
-            "   LLM_BASE_URL=http://localhost:11434/v1\n"
-            "   LLM_MODEL=qwen2.5:14b  # or llama3.1:8b / mistral\n"
-            "   LLM_API_KEY=none\n\n"
-            "   # For vLLM server:\n"
-            "   LLM_BASE_URL=http://localhost:8000/v1\n"
-            "   LLM_MODEL=your_served_model_name\n"
+            "### ⚖️ GST PRACTICE COPILOT — INFERENCE SETUP REQUIRED\n\n"
+            "The legal research agent is running in local-first mode, but no active LLM endpoint was detected.\n\n"
+            "To activate statutory reasoning and memorandum synthesis:\n"
+            "1. Open your local `.env` file in the project root.\n"
+            "2. Configure an OpenAI-compatible endpoint (Ollama, vLLM, DeepInfra, etc.):\n"
+            "   ```bash\n"
+            "   # For Local Ollama:\n"
+            "   LLM_BASE_URL=http://127.0.0.1:11434/v1\n"
+            "   LLM_MODEL=qwen2.5:14b\n"
             "   LLM_API_KEY=none\n\n"
             "   # For DeepInfra / Remote Serverless:\n"
             "   LLM_BASE_URL=https://api.deepinfra.com/v1\n"
@@ -72,70 +104,18 @@ async def query_understanding_node(state: ResearchState) -> dict:
             "final_report": guidance,
         }
 
-    # Format context from previous messages
-    context_turns = []
-    for msg in state.messages[-4:]:
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        context_turns.append(f"{role.capitalize()}: {content}")
-    context_str = "\n".join(context_turns) if context_turns else "None (New Conversation)"
+    # Fast heuristic extraction for instant sub-second statutory lookup planning
+    extracted_facts = _extract_facts_heuristically(query)
+    assumptions = [
+        "Taxpayer assumed to be a regular registered taxable person under Section 22/24 of the CGST Act, 2017.",
+        "Supplies are assumed to be made in the course or furtherance of business under active GST provisions.",
+    ]
 
-    prompt = QUERY_UNDERSTANDING_PROMPT.format(query=query, context=context_str)
-
-    try:
-        llm = llm_factory.get_chat_model()
-        response = await llm.ainvoke([
-            SystemMessage(content=GST_RESEARCHER_SYSTEM_PROMPT),
-            HumanMessage(content=prompt),
-        ])
-        content_text = response.content if isinstance(response.content, str) else str(response.content)
-        parsed = _extract_json_from_text(content_text)
-
-        gst_topics = parsed.get("gst_topics", ["General GST Compliance"])
-        fy = parsed.get("financial_year", "Not Specified")
-        tax_period = parsed.get("tax_period", "Not Specified")
-        txn_date = parsed.get("transaction_date", "Not Specified")
-        jurisdiction = parsed.get("jurisdiction", "Central / All India")
-        taxpayer_type = parsed.get("taxpayer_type", "Regular Taxable Person")
-        nature_of_supply = parsed.get("nature_of_supply", "Standard Taxable Supply")
-        material_facts = parsed.get("material_facts", [query])
-        missing_critical_facts = parsed.get("missing_critical_facts", [])
-        assumptions = parsed.get("assumptions", [])
-        needs_clarification = bool(parsed.get("needs_clarification", False))
-        clarification_question = parsed.get("clarification_question", "")
-
-        extracted_facts = {
-            "gst_topics": gst_topics,
-            "financial_year": fy,
-            "tax_period": tax_period,
-            "transaction_date": txn_date,
-            "jurisdiction": jurisdiction,
-            "taxpayer_type": taxpayer_type,
-            "nature_of_supply": nature_of_supply,
-            "material_facts": material_facts,
-        }
-
-        return {
-            "current_step": "query_understanding",
-            "extracted_facts": extracted_facts,
-            "assumptions": assumptions,
-            "missing_facts": missing_critical_facts,
-            "needs_clarification": needs_clarification,
-            "clarification_prompt": clarification_question,
-        }
-    except Exception as e:
-        logger.error(f"Error in query_understanding_node: {e}")
-        # Rule-based fallback
-        fallback_facts = {
-            "gst_topics": ["Goods and Services Tax"],
-            "financial_year": "Current Period",
-            "jurisdiction": "Central",
-            "taxpayer_type": "Regular",
-            "material_facts": [query],
-        }
-        return {
-            "current_step": "query_understanding",
-            "extracted_facts": fallback_facts,
-            "assumptions": ["Proceeding with standard provisions under CGST Act, 2017."],
-            "needs_clarification": False,
-        }
+    return {
+        "current_step": "query_understanding",
+        "extracted_facts": extracted_facts,
+        "assumptions": assumptions,
+        "missing_facts": [],
+        "needs_clarification": False,
+        "clarification_prompt": "",
+    }

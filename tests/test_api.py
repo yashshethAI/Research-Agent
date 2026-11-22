@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+
 from starlette.testclient import TestClient
 
+from backend.app.llm.factory import llm_factory
 from backend.app.main import app
 
 client = TestClient(app)
@@ -26,7 +29,8 @@ def test_api_config_status_endpoint():
     assert data["data_dir_writable"] is True
 
 
-def test_api_chat_endpoint_unconfigured_llm():
+def test_api_chat_endpoint_unconfigured_llm(monkeypatch):
+    monkeypatch.setattr(llm_factory, "is_configured", lambda: False)
     payload = {
         "query": "Is ITC admissible on corporate CSR expenditure?",
         "user_role": "Professional",
@@ -41,7 +45,8 @@ def test_api_chat_endpoint_unconfigured_llm():
     assert "INFERENCE SETUP REQUIRED" in data["answer"]
 
 
-def test_api_conversations_flow():
+def test_api_conversations_flow(monkeypatch):
+    monkeypatch.setattr(llm_factory, "is_configured", lambda: False)
     # 1. Post a query to generate conversation
     chat_resp = client.post(
         "/api/v1/chat",
@@ -76,3 +81,23 @@ def test_api_document_upload():
     assert data["filename"] == "notice_sec73.pdf"
     assert "sha256_hash" in data
     assert len(data["sha256_hash"]) == 64
+
+
+def test_api_chat_stream_endpoint(monkeypatch):
+    monkeypatch.setattr(llm_factory, "is_configured", lambda: False)
+    payload = {
+        "query": "Is GST applicable on directors remuneration under RCM?",
+        "conversation_id": "test-sse-stream-conv",
+        "user_role": "Professional",
+        "stream": True,
+    }
+    with client.stream("POST", "/api/v1/chat/stream", json=payload) as response:
+        assert response.status_code == 200
+        events = []
+        for line in response.iter_lines():
+            if line.startswith("data: "):
+                events.append(json.loads(line[6:]))
+        assert len(events) >= 2
+        assert events[0]["event"] == "started"
+        event_types = [e["event"] for e in events]
+        assert "complete" in event_types or "step" in event_types

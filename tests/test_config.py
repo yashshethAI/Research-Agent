@@ -4,7 +4,7 @@ from backend.app.core.config import Settings
 
 
 def test_settings_default_values():
-    s = Settings()
+    s = Settings(_env_file=None)
     assert s.APP_NAME == "GST Practice Copilot"
     assert s.APP_PORT == 8000
     assert s.STREAMLIT_PORT == 8501
