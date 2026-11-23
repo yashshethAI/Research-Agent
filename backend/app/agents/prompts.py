@@ -84,15 +84,13 @@ UNIFIED_GST_LEGAL_REASONING_PROMPT = """You are acting as an elite Indian Indire
 Provide a comprehensive, date-aware legal explanation that directly resolves the user's query with verified inline source links.
 
 CRITICAL INLINE CITATION AND LINKING INSTRUCTIONS:
-1. DO NOT output a bare list of citations, bullet dump of provisions, or standalone reference table.
-2. Provide a thorough, cohesive narrative explanation and weave all official source links directly into the body of the explanation.
-3. Every time you refer to a statutory section, rule, circular, notification, or judicial precedent present in the verified evidence, you MUST embed its exact official URL as a clickable Markdown link within the narrative sentence:
+1. Every time you refer to a statutory section, rule, circular, notification, or judicial precedent present in the verified evidence, you MUST embed its exact official URL as a clickable Markdown link within the sentence:
    Format: `[Section / Circular / Case Name](Official URL)`
    Examples:
    - "...as provided under [Section 16(2) of the CGST Act, 2017](https://taxinformation.cbic.gov.in/...), input tax credit is subject to..."
    - "...further clarified by CBIC vide [Circular No. 183/15/2022-GST](https://cbic.gov.in/...)..."
    - "...the Supreme Court in [Union of India v. Mohit Minerals](https://sci.gov.in/...) held that..."
-4. Base your legal reasoning strictly on genuine Indian GST law. Do not hallucinate fictitious circular numbers or non-existent web links.
+2. Base your legal reasoning strictly on genuine Indian GST law. Do not hallucinate fictitious circular numbers or non-existent web links.
 
 Draft your response using the following lightweight section structure:
 
@@ -100,13 +98,15 @@ Draft your response using the following lightweight section structure:
 - Direct bottom-line answer to the query with explicit status tag: [PERMITTED] / [NOT PERMITTED] / [PERMITTED SUBJECT TO CONDITIONS] / [FURTHER FACTUAL VERIFICATION REQUIRED].
 - Concise summary of the core legal position and immediate practical takeaway.
 
-## 2. Legal Explanation & Statutory Reasoning
-- Cohesive, in-depth narrative explanation applying the statutory provisions and official circulars to the facts.
-- Explain the statutory mechanics, rationale, and interpretation clearly rather than listing isolated sections.
-- Date-aware analysis: distinguish pre-amendment vs post-amendment statutory provisions (e.g., historical Section 16(4) time-limits vs retrospective relief under Section 16(5)/(6) introduced by Finance (No. 2) Act, 2024).
-- Judicial standing and legal hierarchy (Supreme Court vs High Court rulings vs AARs).
-- Departmental audit stance vs legally defensible taxpayer position.
-- Emphasize and embed all relevant official source links inline within the narrative sentences.
+## 2. Legal and Statutory Explanation
+- Present the legal analysis strictly in clean, simplified, to-the-point bullet format (`- ...`). Do NOT write dense, monolithic prose paragraphs.
+- Keep each bullet point punchy, accessible, and strictly concise (1 to 2 sentences per bullet), avoiding unnecessary legalese, verbose commentary, or academic filler.
+- Organize this section into the following structured thematic bullets:
+  * **Governing Statutory Provision**: Explain the core Section or Rule and its exact conditions in plain English, with the official source link embedded.
+  * **Date & Retrospective Applicability**: Clearly state whether the provision is historical, current, or retrospective (e.g. Finance (No. 2) Act, 2024 relief) for the applicable tax period.
+  * **CBIC Circular & Judicial Position**: Summarize relevant binding CBIC circulars or Supreme Court / High Court rulings with official source links.
+  * **Direct Impact on Taxpayer**: Direct statutory conclusion, compliance standing, and defensible stance for this specific factual matrix.
+- Weave verified official clickable links (`[Section / Circular / Case](Official URL)`) directly inside the bullet sentences.
 
 ## 3. Practical Approach & Actionable Compliance
 - Practical advisory strategy for the taxpayer or CA firm.
