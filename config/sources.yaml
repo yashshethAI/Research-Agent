@@ -124,6 +124,118 @@ official_sources:
       - "tgct.gov.in"
       - "rajasthantax.gov.in"
 
+  - id: icai_portal
+    name: "Institute of Chartered Accountants of India"
+    base_url: "https://www.icai.org"
+    authority: "ICAI - Indirect Taxes Committee"
+    priority: 2
+    document_types:
+      - "Technical Guide on GST Annual Return & Audit"
+      - "GST Educational Series"
+      - "Background Material on GST (BGM)"
+      - "Guidance Notes on Accounting & Reconciliation"
+    domains:
+      - "www.icai.org"
+      - "icai.org"
+
+  - id: icsi_portal
+    name: "Institute of Company Secretaries of India"
+    base_url: "https://www.icsi.edu"
+    authority: "ICSI - Corporate Laws & Secretarial Audit"
+    priority: 2
+    document_types:
+      - "Secretarial Audit GST Guidance"
+      - "Corporate Compliance Bulletins"
+    domains:
+      - "www.icsi.edu"
+      - "icsi.edu"
+
+  - id: indian_kanoon
+    name: "Indian Kanoon Legal Repository"
+    base_url: "https://indiankanoon.org"
+    authority: "Judicial Precedents Archive (Indian Kanoon)"
+    priority: 2
+    document_types:
+      - "Supreme Court GST Judgments"
+      - "High Court Writ Petitions & Rulings"
+      - "CESTAT Appellate Orders"
+    domains:
+      - "indiankanoon.org"
+
+  - id: cestat_tribunal
+    name: "Customs, Excise & Service Tax Appellate Tribunal"
+    base_url: "https://cestat.gov.in"
+    authority: "CESTAT Appellate Tribunal"
+    priority: 2
+    document_types:
+      - "Appellate Tribunal Orders"
+      - "Transitional Credit (Section 140) Jurisprudence"
+    domains:
+      - "cestat.gov.in"
+      - "cestatnew.nic.in"
+
+  - id: taxmann_reporter
+    name: "Taxmann Tax Law Reporter"
+    base_url: "https://www.taxmann.com"
+    authority: "Tax Law Reporter (Taxmann)"
+    priority: 3
+    document_types:
+      - "Goods & Services Tax Reports (GSTR)"
+      - "Case Law Digests & High Court Analyses"
+      - "Notification & Circular Commentaries"
+    domains:
+      - "www.taxmann.com"
+      - "taxmann.com"
+
+  - id: livelaw_reporter
+    name: "LiveLaw Legal News"
+    base_url: "https://www.livelaw.in"
+    authority: "Legal Case Reporter (LiveLaw)"
+    priority: 3
+    document_types:
+      - "Supreme Court & High Court GST Case Reports"
+      - "Interim Stay Orders & Writ Petition Updates"
+    domains:
+      - "www.livelaw.in"
+      - "livelaw.in"
+
+  - id: barandbench_reporter
+    name: "Bar & Bench Legal Portal"
+    base_url: "https://www.barandbench.com"
+    authority: "Legal News & Analysis (Bar & Bench)"
+    priority: 3
+    document_types:
+      - "High Court Tax Bench Reports"
+      - "GST Litigation Updates"
+    domains:
+      - "www.barandbench.com"
+      - "barandbench.com"
+
+  - id: taxguru_portal
+    name: "TaxGuru Tax & Law Portal"
+    base_url: "https://taxguru.in"
+    authority: "Tax Practice Portal (TaxGuru)"
+    priority: 4
+    document_types:
+      - "Practitioner Commentary"
+      - "Advance Ruling Digests"
+      - "Notification Summaries"
+    domains:
+      - "www.taxguru.in"
+      - "taxguru.in"
+
+  - id: cleartax_portal
+    name: "ClearTax GST Return Portal"
+    base_url: "https://cleartax.in"
+    authority: "Tax Return & Filing Portal (ClearTax)"
+    priority: 4
+    document_types:
+      - "GSTR Return Filing Walkthroughs"
+      - "Table Disclosures & Compliance Timelines"
+    domains:
+      - "www.cleartax.in"
+      - "cleartax.in"
+
 # Source Ranking Rules
 authority_hierarchy:
   - "Constitution of India"
@@ -136,5 +248,9 @@ authority_hierarchy:
   - "CBIC Circulars / Instructions (Binding on Department)"
   - "Appellate Authority for Advance Rulings (AAAR)"
   - "Authority for Advance Rulings (AAR)"
+  - "Customs, Excise and Service Tax Appellate Tribunal (CESTAT)"
+  - "ICAI Technical Guides & Guidance Notes (Authoritative Accounting/CA Standards)"
   - "GSTN Advisories (Procedural / Portal Operations)"
   - "GST Council Recommendations (Non-statutory until notified)"
+  - "Authoritative Tax Law Reporters (Taxmann, Indian Kanoon, LiveLaw)"
+  - "Secondary Tax Commentary & Return Portals (TaxGuru, ClearTax)"

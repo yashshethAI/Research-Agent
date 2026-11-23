@@ -53,6 +53,7 @@ class MockSearchAdapter(BaseSearchProvider):
         query: str,
         domains: list[str] | None = None,
         max_results: int = 10,
+        time_range: str | None = None,
     ) -> list[SearchResult]:
         sanitized = sanitize_search_query(query).lower()
         results: list[SearchResult] = []

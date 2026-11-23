@@ -27,6 +27,11 @@ async def official_source_search_node(state: ResearchState) -> dict:
     else:
         adapter = TavilySearchAdapter()
 
+    # Determine automated recency filter
+    q_lower = (state.query or "").lower()
+    recency_keywords = ["latest", "recent", "amendment", "amendments", "new", "update", "updates", "current"]
+    time_range = "year" if any(w in q_lower for w in recency_keywords) else None
+
     aggregated_results: list[SearchResult] = []
     seen_urls = set()
 
@@ -36,6 +41,7 @@ async def official_source_search_node(state: ResearchState) -> dict:
                 query=q,
                 domains=settings.allowed_domains,
                 max_results=settings.MAX_SEARCH_RESULTS,
+                time_range=time_range,
             )
             for r in results:
                 # Filter through source validator

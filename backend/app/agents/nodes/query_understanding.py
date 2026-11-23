@@ -58,9 +58,15 @@ def _extract_facts_heuristically(query: str) -> dict[str, Any]:
     if not topics:
         topics = ["General GST Advisory"]
 
-    # Detect FY
+    # Detect FY (default to active Indian FY in IST if not explicitly stated)
+    from datetime import datetime, timedelta, timezone
+
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(ist_tz)
+    default_fy = f"FY {now.year}-{str(now.year + 1)[-2:]}" if now.month >= 4 else f"FY {now.year - 1}-{str(now.year)[-2:]}"
+
     fy_match = re.search(r"\b(FY\s*)?20\d{2}[-–/]\d{2,4}\b", query, re.IGNORECASE)
-    fy = fy_match.group(0) if fy_match else "Current Applicable Period"
+    fy = fy_match.group(0) if fy_match else default_fy
 
     return {
         "gst_topics": list(dict.fromkeys(topics)),

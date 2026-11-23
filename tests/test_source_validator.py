@@ -31,10 +31,17 @@ def test_allowlisted_domain_accepted(monkeypatch):
     # Mock socket resolution so test does not depend on live internet DNS
     monkeypatch.setattr("socket.getaddrinfo", lambda host, port: [(None, None, None, None, ("164.100.1.1", 443))])
 
-    validator = SourceValidator(allowed_domains=["cbic.gov.in"], enforce_official=True)
+    validator = SourceValidator(allowed_domains=["cbic.gov.in", "tutorial.gst.gov.in"], enforce_official=True)
     valid, reason = validator.validate_url("https://www.cbic.gov.in/circular.pdf")
     assert valid is True
     assert "permitted" in reason
+
+
+def test_obsolete_prototype_url_rejected():
+    validator = SourceValidator(allowed_domains=["tutorial.gst.gov.in"], enforce_official=True)
+    valid, reason = validator.validate_url("https://tutorial.gst.gov.in/offlineutilities/returns/NewGSTReturn_Normal.pdf")
+    assert valid is False
+    assert "obsolete prototype or draft utility" in reason
 
 
 def test_sanitize_search_query():

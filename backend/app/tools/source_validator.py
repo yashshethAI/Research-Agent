@@ -71,7 +71,12 @@ class SourceValidator:
             if not matched:
                 return False, f"Domain '{hostname}' is not in the approved official GST domain registry."
 
-        # 2. SSRF Check: Resolve hostname to IP and check if private
+        # 2. Exclude obsolete prototype or draft return utilities
+        path_lower = (parsed.path or "").lower()
+        if "offlineutilities/returns/newgstreturn" in path_lower or "prototype" in path_lower:
+            return False, f"URL path '{parsed.path}' is an obsolete prototype or draft utility, not enacted law."
+
+        # 3. SSRF Check: Resolve hostname to IP and check if private
         try:
             addr_info = socket.getaddrinfo(hostname, None)
             for entry in addr_info:

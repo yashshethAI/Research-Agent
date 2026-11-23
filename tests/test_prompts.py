@@ -22,6 +22,13 @@ def test_unified_gst_legal_reasoning_prompt_structure():
     assert "CBIC Circular & Judicial Position" in UNIFIED_GST_LEGAL_REASONING_PROMPT
     assert "Direct Impact on Taxpayer" in UNIFIED_GST_LEGAL_REASONING_PROMPT
 
+    # Temporal baseline checks
+    assert "{current_date}" in UNIFIED_GST_LEGAL_REASONING_PROMPT
+    assert "{current_fy}" in UNIFIED_GST_LEGAL_REASONING_PROMPT
+    assert "{preceding_fy}" in UNIFIED_GST_LEGAL_REASONING_PROMPT
+    assert "TEMPORAL REFERENCE BASELINE" in UNIFIED_GST_LEGAL_REASONING_PROMPT
+    assert "CRITICAL LEGAL REASONING INVARIANTS" in UNIFIED_GST_LEGAL_REASONING_PROMPT
+
     # Alias check
     assert FINAL_ANSWER_MEMORANDUM_PROMPT == UNIFIED_GST_LEGAL_REASONING_PROMPT
 

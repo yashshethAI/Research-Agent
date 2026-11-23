@@ -12,6 +12,8 @@ def test_settings_default_values():
     assert s.MAX_RESEARCH_RETRIES == 2
     assert s.MAX_SOURCE_SIZE_MB == 20
     assert s.MAX_UPLOAD_SIZE_MB == 20
+    assert s.MAX_SEARCH_RESULTS == 20
+    assert s.MAX_FETCH_SOURCES == 8
 
 
 def test_is_llm_configured_logic():
@@ -43,3 +45,7 @@ def test_allowed_domains_loaded_from_sources_yaml():
     assert "gst.gov.in" in domains
     assert "gstcouncil.gov.in" in domains
     assert "sci.gov.in" in domains
+    assert "icai.org" in domains
+    assert "indiankanoon.org" in domains
+    assert "taxmann.com" in domains
+    assert "cleartax.in" in domains

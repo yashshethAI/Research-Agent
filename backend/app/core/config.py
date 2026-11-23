@@ -35,7 +35,8 @@ class Settings(BaseSettings):
     # Web Search
     SEARCH_PROVIDER: str = "tavily"
     TAVILY_API_KEY: str | None = None
-    MAX_SEARCH_RESULTS: int = 10
+    MAX_SEARCH_RESULTS: int = 20
+    MAX_FETCH_SOURCES: int = 8
     MAX_RESEARCH_RETRIES: int = 2
 
     # Source Validation & Security

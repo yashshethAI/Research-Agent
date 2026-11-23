@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -28,6 +29,7 @@ class TavilySearchAdapter(BaseSearchProvider):
         query: str,
         domains: list[str] | None = None,
         max_results: int = 10,
+        time_range: str | None = None,
     ) -> list[SearchResult]:
         if not self.api_key or not self.api_key.strip():
             raise SearchNotConfiguredError(
@@ -38,7 +40,7 @@ class TavilySearchAdapter(BaseSearchProvider):
         sanitized_query = sanitize_search_query(query)
         allowed_domains = domains or settings.allowed_domains
 
-        payload = {
+        payload: dict[str, Any] = {
             "api_key": self.api_key,
             "query": sanitized_query,
             "search_depth": "advanced",
@@ -47,6 +49,8 @@ class TavilySearchAdapter(BaseSearchProvider):
             "max_results": max_results,
             "include_domains": allowed_domains if allowed_domains else None,
         }
+        if time_range:
+            payload["time_range"] = time_range
 
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(self.api_url, json=payload)

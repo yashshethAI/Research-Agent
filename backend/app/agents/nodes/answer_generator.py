@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -70,7 +71,18 @@ async def answer_generator_node(state: ResearchState) -> dict:
         f"Adopted Assumptions:\n{json.dumps(state.assumptions, indent=2)}"
     )
 
+    # Compute live Indian tax calendar context
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(ist_tz)
+    current_date_str = now.strftime("%d %B %Y")
+    current_year = now.year
+    current_fy = f"FY {current_year}-{str(current_year + 1)[-2:]}" if now.month >= 4 else f"FY {current_year - 1}-{str(current_year)[-2:]}"
+    preceding_fy = f"FY {current_year - 1}-{str(current_year)[-2:]}" if now.month >= 4 else f"FY {current_year - 2}-{str(current_year - 1)[-2:]}"
+
     prompt = UNIFIED_GST_LEGAL_REASONING_PROMPT.format(
+        current_date=current_date_str,
+        current_fy=current_fy,
+        preceding_fy=preceding_fy,
         query=state.query,
         facts=facts_summary,
         evidence=evidence_str,
