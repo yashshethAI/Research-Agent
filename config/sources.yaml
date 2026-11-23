@@ -1,0 +1,140 @@
+# Official Indian GST Legal Sources Allowlist & Registry
+
+official_sources:
+  - id: cbic_taxinfo
+    name: "CBIC Tax Information Portal"
+    base_url: "https://taxinformation.cbic.gov.in"
+    authority: "Central Board of Indirect Taxes and Customs (CBIC)"
+    priority: 1
+    document_types:
+      - "CGST Act, 2017"
+      - "IGST Act, 2017"
+      - "UTGST Act, 2017"
+      - "GST (Compensation to States) Act, 2017"
+      - "CGST Rules, 2017"
+      - "Central Tax Notifications"
+      - "Integrated Tax Notifications"
+      - "CBIC Circulars"
+      - "CBIC Instructions"
+      - "Flyers and Guidance Notes"
+    domains:
+      - "taxinformation.cbic.gov.in"
+
+  - id: cbic_main
+    name: "CBIC Official Portal"
+    base_url: "https://www.cbic.gov.in"
+    authority: "Central Board of Indirect Taxes and Customs (CBIC)"
+    priority: 1
+    document_types:
+      - "Notifications"
+      - "Circulars"
+      - "Press Releases"
+      - "Tariff Schedules"
+    domains:
+      - "www.cbic.gov.in"
+      - "cbic.gov.in"
+
+  - id: gstn_portal
+    name: "GST System Official Portal"
+    base_url: "https://www.gst.gov.in"
+    authority: "Goods and Services Tax Network (GSTN)"
+    priority: 2
+    document_types:
+      - "GSTN System Advisories"
+      - "Return Filing Guidelines"
+      - "Portal Procedures"
+      - "News and Updates"
+    domains:
+      - "www.gst.gov.in"
+      - "gst.gov.in"
+
+  - id: gstn_tutorial
+    name: "GST Portal User Manuals & Tutorials"
+    base_url: "https://tutorial.gst.gov.in"
+    authority: "Goods and Services Tax Network (GSTN)"
+    priority: 2
+    document_types:
+      - "Form Filing Manuals"
+      - "GSTR-1 / 3B / 9 / 9C Instructions"
+      - "Portal Navigation Guides"
+    domains:
+      - "tutorial.gst.gov.in"
+
+  - id: gst_council
+    name: "GST Council Secretariat"
+    base_url: "https://gstcouncil.gov.in"
+    authority: "GST Council Secretariat, Ministry of Finance"
+    priority: 2
+    document_types:
+      - "Council Meeting Recommendations"
+      - "Minutes of GST Council Meetings"
+      - "Press Releases"
+    domains:
+      - "gstcouncil.gov.in"
+
+  - id: supreme_court
+    name: "Supreme Court of India"
+    base_url: "https://www.sci.gov.in"
+    authority: "Supreme Court of India"
+    priority: 1
+    document_types:
+      - "Judgments"
+      - "Orders"
+    domains:
+      - "www.sci.gov.in"
+      - "sci.gov.in"
+
+  - id: high_courts_ecourts
+    name: "High Courts & eCourts Portal"
+    base_url: "https://services.ecourts.gov.in"
+    authority: "High Courts of Indian States"
+    priority: 2
+    document_types:
+      - "High Court Rulings"
+      - "Writ Petitions"
+      - "Appellate Decisions"
+    domains:
+      - "services.ecourts.gov.in"
+      - "ecourts.gov.in"
+      - "allahabadhighcourt.in"
+      - "bombayhighcourt.nic.in"
+      - "delhihighcourt.nic.in"
+      - "hcmadras.tn.nic.in"
+      - "highcourtchd.gov.in"
+      - "calcuttahighcourt.gov.in"
+      - "karnatakajudiciary.kar.nic.in"
+      - "gujarathighcourt.nic.in"
+
+  - id: state_gst_departments
+    name: "State Commercial Tax Portals"
+    base_url: "https://comtax.up.nic.in"
+    authority: "State Commercial Tax Departments"
+    priority: 3
+    document_types:
+      - "SGST Notifications"
+      - "State Orders"
+      - "State AAR Rulings"
+    domains:
+      - "comtax.up.nic.in"
+      - "mahagst.gov.in"
+      - "commercialtax.gujarat.gov.in"
+      - "wbcomtax.nic.in"
+      - "keralataxes.gov.in"
+      - "ctd.tn.gov.in"
+      - "tgct.gov.in"
+      - "rajasthantax.gov.in"
+
+# Source Ranking Rules
+authority_hierarchy:
+  - "Constitution of India"
+  - "Supreme Court of India"
+  - "CGST / IGST / UTGST Act (Statutory Enactments)"
+  - "Jurisdictional High Court Judgments"
+  - "Other High Courts Judgments"
+  - "CGST / IGST Rules (Subordinate Legislation)"
+  - "Statutory Notifications (CBIC / Central Government)"
+  - "CBIC Circulars / Instructions (Binding on Department)"
+  - "Appellate Authority for Advance Rulings (AAAR)"
+  - "Authority for Advance Rulings (AAR)"
+  - "GSTN Advisories (Procedural / Portal Operations)"
+  - "GST Council Recommendations (Non-statutory until notified)"
