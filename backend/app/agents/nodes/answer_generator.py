@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 async def answer_generator_node(state: ResearchState) -> dict:
-    """Node 12: Executes unified legal reasoning, synthesizes the 12-section GST memorandum with clickable source links."""
+    """Node 12: Executes unified legal reasoning, synthesizes a comprehensive GST legal explanation with inline clickable source links."""
     # 1. If LLM endpoint is unconfigured, return setup instructions
     if state.llm_unconfigured_guidance:
         return {
@@ -48,7 +48,7 @@ async def answer_generator_node(state: ResearchState) -> dict:
             "final_report": "Error: LLM endpoint is not configured. Please check your `.env` configuration.",
         }
 
-    # 4. Generate unified 12-section memorandum with integrated clickable citations
+    # 4. Generate unified legal explanation with integrated inline clickable citations
     facts = state.extracted_facts
     evidence = state.evidence_records or []
     user_role = state.user_role
@@ -84,22 +84,6 @@ async def answer_generator_node(state: ResearchState) -> dict:
             HumanMessage(content=prompt),
         ])
         content_text = response.content if isinstance(response.content, str) else str(response.content)
-
-        # Ensure Section L Sources Table is present with verified official clickable links
-        if evidence and "AUTHORITATIVE SOURCES" not in content_text.upper() and "LEGAL REFERENCES" not in content_text.upper():
-            table_lines = [
-                "\n\n---\n\n## L. AUTHORITATIVE SOURCES & REFERENCES REFERRED\n",
-                "| Source ID | Authority | Legal Reference / Topic | Official Verified Link |",
-                "| :--- | :--- | :--- | :--- |",
-            ]
-            for e in evidence:
-                sid = e.get("source_id", "SRC")
-                auth = e.get("authority", "Official Authority")
-                ref = e.get("section_or_rule", e.get("title", "Statutory Provision"))
-                url = e.get("url", "")
-                link_md = f"[{e.get('title', 'View Official Document')}]({url})" if url else "Official CBIC Record"
-                table_lines.append(f"| [{sid}] | {auth} | {ref} | {link_md} |")
-            content_text += "\n" + "\n".join(table_lines) + "\n"
 
         return {
             "current_step": "answer_generator",

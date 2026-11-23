@@ -30,7 +30,7 @@ NODE_STEP_LABELS: dict[str, str] = {
     "evidence_compiler": "Indexed and structured legal evidence records",
     "legal_analysis": "Completed date-aware statutory legal analysis",
     "citation_validator": "Audited citations against official sources",
-    "answer_generator": "Synthesized 12-section GST Research Memorandum",
+    "answer_generator": "Synthesized legal explanation with inline source links",
     "persistence_node": "Persisted session artifacts to local storage",
 }
 

@@ -153,7 +153,7 @@ st.divider()
 if not st.session_state.messages:
     st.info(
         "👋 **Welcome to GST Practice Copilot**.\n\n"
-        "Ask any complex Indian GST query to produce a complete **12-Section Legal Research Memorandum**.\n\n"
+        "Ask any complex Indian GST query to produce an in-depth **Legal Advisory Explanation with Verified Source Links**.\n\n"
         "**Example Legal Queries to Try:**\n"
         "- *What is the legal position on availing ITC after the due date under Section 16(4) following Finance (No. 2) Act, 2024?*\n"
         "- *Is GST applicable on remuneration paid to executive directors under reverse charge mechanism (RCM)?*\n"
@@ -178,9 +178,9 @@ for idx, msg in enumerate(st.session_state.messages):
         # Download button for assistant responses
         if role == "assistant" and content and not content.startswith("Error"):
             st.download_button(
-                label="📥 Download Research Memorandum (.md)",
+                label="📥 Download Legal Advisory (.md)",
                 data=content,
-                file_name=f"GST_Research_Memorandum_{st.session_state.conversation_id[:8]}.md",
+                file_name=f"GST_Advisory_Explanation_{st.session_state.conversation_id[:8]}.md",
                 mime="text/markdown",
                 key=f"dl_{idx}",
             )
@@ -247,7 +247,7 @@ if user_prompt:
                         evidence_list = event_data.get("evidence", [])
                         research_id = event_data.get("research_id")
                         needs_clarification = event_data.get("needs_clarification", False)
-                        status_box.update(label="✅ Legal Research Memorandum Completed", state="complete", expanded=False)
+                        status_box.update(label="✅ Legal Research Explanation Completed", state="complete", expanded=False)
 
                     elif event_type == "error":
                         raise RuntimeError(event_data.get("detail", "Unknown error during streaming"))
@@ -278,9 +278,9 @@ if user_prompt:
                 refresh_backend_data()
 
                 st.download_button(
-                    label="📥 Download Research Memorandum (.md)",
+                    label="📥 Download Legal Advisory (.md)",
                     data=answer_text,
-                    file_name=f"GST_Research_Memorandum_{st.session_state.conversation_id[:8]}.md",
+                    file_name=f"GST_Advisory_Explanation_{st.session_state.conversation_id[:8]}.md",
                     mime="text/markdown",
                     key="dl_latest",
                 )

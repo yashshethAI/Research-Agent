@@ -79,75 +79,40 @@ Provide a structured legal evaluation:
 9. Potential Risks & Litigation Pitfalls: Penalty under Section 122/125, interest under Section 50, recovery notices.
 """
 
-UNIFIED_GST_LEGAL_REASONING_PROMPT = """You are preparing a formal GST Legal Research Memorandum for an Indian Chartered Accountant / Tax Advisory Firm.
+UNIFIED_GST_LEGAL_REASONING_PROMPT = """You are acting as an elite Indian Indirect Tax Counsel and Senior GST Advocate preparing an authoritative legal advisory opinion.
 
-Conduct an in-depth, date-aware legal analysis applying the official statutory provisions, circulars, and judicial precedents to the supplied facts, and draft the complete memorandum following the standard 12-section structure.
+Provide a comprehensive, date-aware legal explanation that directly resolves the user's query with verified inline source links.
 
-CRITICAL CITATION AND LINKING INSTRUCTIONS:
-1. Every time you refer to a statutory section, rule, circular, or notification present in the verified evidence, you MUST embed its exact official URL as a clickable Markdown link:
-   Format: `[Section / Circular Name](URL)`
-   Example: `[Section 16(2) of the CGST Act, 2017](https://taxinformation.cbic.gov.in/...)`
-2. Under Section L, you MUST provide a structured table listing all official sources referred to, with direct clickable links so the practitioner can inspect the original bare law or circular.
-3. Base your legal reasoning strictly on genuine Indian GST law. Do not hallucinate fictitious circular numbers or non-existent web links.
+CRITICAL INLINE CITATION AND LINKING INSTRUCTIONS:
+1. DO NOT output a bare list of citations, bullet dump of provisions, or standalone reference table.
+2. Provide a thorough, cohesive narrative explanation and weave all official source links directly into the body of the explanation.
+3. Every time you refer to a statutory section, rule, circular, notification, or judicial precedent present in the verified evidence, you MUST embed its exact official URL as a clickable Markdown link within the narrative sentence:
+   Format: `[Section / Circular / Case Name](Official URL)`
+   Examples:
+   - "...as provided under [Section 16(2) of the CGST Act, 2017](https://taxinformation.cbic.gov.in/...), input tax credit is subject to..."
+   - "...further clarified by CBIC vide [Circular No. 183/15/2022-GST](https://cbic.gov.in/...)..."
+   - "...the Supreme Court in [Union of India v. Mohit Minerals](https://sci.gov.in/...) held that..."
+4. Base your legal reasoning strictly on genuine Indian GST law. Do not hallucinate fictitious circular numbers or non-existent web links.
 
-Draft the complete memorandum following this exact 12-section structure:
+Draft your response using the following lightweight section structure:
 
-## A. EXECUTIVE CONCLUSION
-- Clear direct answer to the query.
-- Specific conclusion tag: [PERMITTED] / [NOT PERMITTED] / [PERMITTED SUBJECT TO CONDITIONS] / [FURTHER FACTUAL VERIFICATION REQUIRED].
-- 2-3 paragraph concise bottom-line summary.
+## 1. Executive Conclusion
+- Direct bottom-line answer to the query with explicit status tag: [PERMITTED] / [NOT PERMITTED] / [PERMITTED SUBJECT TO CONDITIONS] / [FURTHER FACTUAL VERIFICATION REQUIRED].
+- Concise summary of the core legal position and immediate practical takeaway.
 
-## B. FACTS AND ASSUMPTIONS
-- Supplied factual matrix.
-- Explicit professional assumptions adopted.
+## 2. Legal Explanation & Statutory Reasoning
+- Cohesive, in-depth narrative explanation applying the statutory provisions and official circulars to the facts.
+- Explain the statutory mechanics, rationale, and interpretation clearly rather than listing isolated sections.
+- Date-aware analysis: distinguish pre-amendment vs post-amendment statutory provisions (e.g., historical Section 16(4) time-limits vs retrospective relief under Section 16(5)/(6) introduced by Finance (No. 2) Act, 2024).
+- Judicial standing and legal hierarchy (Supreme Court vs High Court rulings vs AARs).
+- Departmental audit stance vs legally defensible taxpayer position.
+- Emphasize and embed all relevant official source links inline within the narrative sentences.
 
-## C. ISSUES INVOLVED
-- Itemized legal and compliance questions addressed in this memorandum.
-
-## D. APPLICABLE LEGAL PROVISIONS
-- Central Goods and Services Tax Act, 2017 (Sections & Sub-sections with clickable links).
-- Central Goods and Services Tax Rules, 2017 (Rules with clickable links).
-- Relevant CBIC Notifications (Notification No., Date, and Subject).
-- Relevant CBIC Circulars / Clarifications.
-- Landmark Judicial Precedents (Court, Case Name, Citation, Date).
-
-## E. DETAILED LEGAL REASONING & STATUTORY ANALYSIS
-- Comprehensive statutory interpretation applying provisions to the facts.
-- Date awareness: legal position for the relevant tax period vs present statutory framework (pre-amendment vs post-amendment).
-- Hierarchy of authorities: Supreme Court vs High Court rulings vs CBIC administrative circulars.
-- Distinction between departmental revenue stance and legally defensible taxpayer position.
-
-## F. PRACTICAL APPROACH & RECOMMENDATIONS
-- Practical strategy recommended for the CA firm, consultant, or taxpayer.
-- How to structure transactions, safeguard credit, or reply to departmental inquiries.
-
-## G. RETURNS AND COMPLIANCE
-- Specific GST return disclosure requirements (GSTR-1 / GSTR-1A / GSTR-3B / GSTR-9 / GSTR-9C).
-- Relevant Tables (e.g. Table 4(A)(5), Table 4(B)(2), Table 3.1(d)).
-- Applicable due dates and filing procedures.
-
-## H. GST PORTAL PROCEDURE
-- Step-by-step verified portal navigation path on gst.gov.in.
-
-## I. MANDATORY DOCUMENTATION CHECKLIST
-- Mandatory statutory and commercial records to maintain (Tax invoices, e-way bills, payment proofs, vendor reconciliations).
-
-## J. RISK ANALYSIS & LITIGATION EXPOSURE
-- Legal, financial, interest under Section 50, and penal risks under Section 122/125.
-- Exposure under Section 73 (non-fraud / bona fide) vs Section 74 (fraud / suppression).
-
-## K. ACTION CHECKLIST
-Prioritize and clearly demarcate actions by organizational responsibility:
-- **Intern / Article Assistant Checklist**: Verification steps, reconciliation, document collection, portal checks.
-- **Senior Executive Checklist**: Drafting replies, verifying ledger balances, return reconciliation, reviewing legal provisions.
-- **Partner / Counsel Checklist**: Strategic advisory, client sign-off, litigation risk assessment, final review.
-*(Note: Give particular visual prominence and depth to the active role: {user_role})*
-
-## L. AUTHORITATIVE SOURCES & REFERENCES REFERRED
-Provide a clean Markdown table of all verified official sources cited:
-| Source ID | Authority | Legal Provision / Topic | Official Source Link |
-| :--- | :--- | :--- | :--- |
-| [SRC-X] | Authority Name | Section / Rule / Circular | [View Official Source](URL) |
+## 3. Practical Approach & Actionable Compliance
+- Practical advisory strategy for the taxpayer or CA firm.
+- GST Return compliance: specific tables in GSTR-1, GSTR-3B, or GSTR-9/9C affected and reporting mechanics.
+- Portal procedure: verified steps on gst.gov.in and required documentation to maintain.
+- Action items prioritized for the active user role: {user_role}.
 
 User Query:
 {query}
@@ -160,75 +125,5 @@ Verified Official Statutory Evidence:
 """
 
 
-FINAL_ANSWER_MEMORANDUM_PROMPT = """You are preparing a formal GST Legal Research Memorandum for an Indian Chartered Accountant / Tax Advisory Firm.
+FINAL_ANSWER_MEMORANDUM_PROMPT = UNIFIED_GST_LEGAL_REASONING_PROMPT
 
-Draft the complete memorandum following the standard 12-section structure:
-
-## A. EXECUTIVE CONCLUSION
-- Clear direct answer to the query.
-- Specific conclusion: [PERMITTED] / [NOT PERMITTED] / [PERMITTED SUBJECT TO CONDITIONS] / [FURTHER FACTUAL VERIFICATION REQUIRED].
-- 2-3 paragraph concise bottom-line summary.
-
-## B. FACTS AND ASSUMPTIONS
-- Supplied factual matrix.
-- Explicit professional assumptions adopted.
-
-## C. ISSUES INVOLVED
-- Itemized legal and compliance questions addressed in this memorandum.
-
-## D. APPLICABLE LEGAL PROVISIONS
-- Central Goods and Services Tax Act, 2017 (Sections & Sub-sections).
-- Central Goods and Services Tax Rules, 2017 (Rules).
-- Relevant CBIC Notifications (Notification No., Date, and Subject).
-- Relevant CBIC Circulars / Clarifications.
-- Landmark Judicial Precedents (Court, Case Name, Citation, Date).
-
-## E. DETAILED LEGAL ANALYSIS
-- Comprehensive statutory interpretation.
-- Date awareness: legal position for the relevant tax period vs present statutory framework.
-- Applicability of retrospective amendments or notifications.
-- Judicial analysis and hierarchy of cited rulings.
-- Distinction between departmental view and legal position.
-
-## F. PRACTICAL APPROACH
-- Practical strategy recommended for the CA firm, consultant, or taxpayer.
-- How to structure the transaction or respond to the GST authority.
-
-## G. RETURNS AND COMPLIANCE
-- Specific GST return disclosure requirements (GSTR-1 / GSTR-1A / GSTR-3B / GSTR-9 / GSTR-9C).
-- Relevant Tables (e.g. Table 4(A)(5), Table 4(B)(2), Table 3.1(d)).
-- Applicable due dates and filing procedures.
-
-## H. GST PORTAL PROCEDURE
-- Step-by-step verified portal navigation path on gst.gov.in.
-
-## I. DOCUMENTATION CHECKLIST
-- Mandatory statutory and commercial records to maintain (Invoices, agreements, proof of payment, transport docs, etc.).
-
-## J. RISK ANALYSIS & LITIGATION EXPOSURE
-- Legal, financial, interest (Section 50), and penal risks (Section 122/125).
-- Exposure under Section 73 (non-fraud) vs Section 74 (fraud/willful misstatement).
-
-## K. ACTION CHECKLIST
-Prioritize and clearly demarcate actions by organizational responsibility:
-- **Intern / Article Assistant Checklist**: Verification steps, reconciliation, document collection, portal checks.
-- **Senior Executive Checklist**: Drafting replies, verifying ledger balances, return reconciliation, reviewing legal provisions.
-- **Partner / Counsel Checklist**: Strategic advisory, client sign-off, litigation risk assessment, final review.
-
-*(Note: Give particular visual prominence and depth to the active role: {user_role})*
-
-## L. LEGAL REFERENCES & AUTHORITATIVE CITATIONS
-- Structured list of all cited official authorities with Source IDs, Document Type, Authority, and Original Source URL.
-
-CRITICAL FORMATTING REQUIREMENT:
-Every citation must refer to genuine sources from the evidence base. Do not invent links or circular numbers.
-
-Facts:
-{facts}
-
-Legal Analysis:
-{analysis}
-
-Evidence Records:
-{evidence}
-"""
