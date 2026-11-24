@@ -7,7 +7,6 @@ It executes deep, date-aware statutory legal research, verifies provisions acros
 
 ---
 
-
 ## 🏛️ Key Capabilities
 
 - **Date-Aware Statutory Interpretation**: Distinguishes notification date, publication date, effective date, and applicable law for specific historical tax periods (e.g., Section 16(4) time-limit changes and retrospective relief under Section 16(5)/(6) introduced by Finance (No. 2) Act, 2024).
