@@ -29,6 +29,19 @@ def test_unified_gst_legal_reasoning_prompt_structure():
     assert "TEMPORAL REFERENCE BASELINE" in UNIFIED_GST_LEGAL_REASONING_PROMPT
     assert "CRITICAL LEGAL REASONING INVARIANTS" in UNIFIED_GST_LEGAL_REASONING_PROMPT
 
+    # Generalized statutory principles & zero hardcoding checks
+    assert "STATUTORY SUBJECT ALIGNMENT PRINCIPLE" in UNIFIED_GST_LEGAL_REASONING_PROMPT
+    assert "Charging & Levy provisions" in UNIFIED_GST_LEGAL_REASONING_PROMPT
+    assert "Valuation provisions" in UNIFIED_GST_LEGAL_REASONING_PROMPT
+    assert "Article 279A" in UNIFIED_GST_LEGAL_REASONING_PROMPT
+    assert "ERP VS GST PORTAL JURISDICTION" in UNIFIED_GST_LEGAL_REASONING_PROMPT
+    assert "POST-IMPLEMENTATION AUDIT" in UNIFIED_GST_LEGAL_REASONING_PROMPT
+
+    # Zero hardcoding checks: No hardcoded section pairs in prompt rules
+    assert "Section 9(1) vs 15(5)" not in UNIFIED_GST_LEGAL_REASONING_PROMPT
+    assert "183/15/2022" not in UNIFIED_GST_LEGAL_REASONING_PROMPT
+    assert "[Circular No. XX/YY/ZZZZ-GST](Official URL)" in UNIFIED_GST_LEGAL_REASONING_PROMPT
+
     # Alias check
     assert FINAL_ANSWER_MEMORANDUM_PROMPT == UNIFIED_GST_LEGAL_REASONING_PROMPT
 

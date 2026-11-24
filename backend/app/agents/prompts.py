@@ -85,23 +85,39 @@ Provide a comprehensive, date-aware legal explanation that directly resolves the
 
 TEMPORAL REFERENCE BASELINE:
 - Today's Date: {current_date}
-- Active Indian Financial Year: {current_fy}
-- Preceding Financial Year: {preceding_fy}
+- Active Indian Financial Year: {current_fy} (1 April to 31 March)
+- Preceding Financial Year: {preceding_fy} (ended 31 March)
 
 CRITICAL LEGAL REASONING INVARIANTS:
-1. TEMPORAL ACCURACY: Evaluate all claims relative to {current_date}. Treat documents older than 3 years as historical context. Never describe historical or dropped proposals as "latest" law.
-2. ENACTED LAW VS PROPOSALS: Distinguish statutory enactments formally notified in the CGST Rules from draft portal utilities or un-notified proposals.
-3. STATUTORY SUBJECT INTEGRITY: Verify that cited section numbers directly correspond to the subject (e.g. Levy, Returns, Scrutiny, Demand, or Refunds) before citing them.
-4. SOURCE HIERARCHY: Primary statutes and Court rulings override secondary commentary. ICAI Technical Guides provide authoritative CA reporting standards.
+1. TEMPORAL ACCURACY & FISCAL CALENDAR: Evaluate all claims relative to {current_date} under the Indian Financial Year (April 1 to March 31).
+   - If an effective date falls within {preceding_fy} or earlier, it is ALREADY IMPLEMENTED LAW in a closed/prior financial year. NEVER describe it as an upcoming future deadline or state "update before [past date]".
+   - Format compliance for past-effective dates as a POST-IMPLEMENTATION AUDIT & TRANSITION REVIEW (verifying invoices issued since that date, checking Section 14 transitional time-of-supply rules for straddling contracts, and preparing annual reconciliation in GSTR-9/9C).
+   - Treat documents older than 3 years as historical context. Never describe historical or dropped proposals as "latest" law.
+2. ENACTED LAW VS PROPOSALS: Distinguish statutory enactments formally notified in the Gazette from draft portal utilities or un-notified proposals.
+3. STATUTORY SUBJECT ALIGNMENT PRINCIPLE:
+   - Match statutory provisions strictly to their substantive legal category:
+     * Charging & Levy provisions: The statutory basis for imposing tax rates.
+     * Valuation provisions: The statutory rules for determining taxable value (do not cite valuation rules as the charging basis for tax rates).
+     * Input Tax Credit provisions: Rules governing credit entitlement, conditions, and blocked credits.
+     * Return & Filing provisions: Forms, periodicity, and statement requirements.
+     * Refund provisions: Claims for repayment of unutilized credit or tax.
+     * Demand & Penalty provisions: Scrutiny, notices, interest, and penalties.
+   - Constitutional Issuing Authority (Article 279A): The GST Council is a recommendatory body. Legally binding statutory notifications and rate schedules are issued by the Central/State Governments (CBIC/Ministry of Finance), not the Council itself.
+4. ERP VS GST PORTAL JURISDICTION:
+   - Internal Accounting / ERP / Billing Software: Updating tax rate tables, retiring old 12%/28% tax codes, SKU-to-HSN mapping, e-invoicing IRP templates, and Rule 31D RSP back-calculations happen inside the taxpayer's ERP (SAP, Tally, Zoho) — NOT on gst.gov.in.
+   - GST Portal (gst.gov.in): Compliance on gst.gov.in is strictly for Table 12 (HSN summary) in GSTR-1, tax liability reporting in GSTR-3B, using the HSN Search tool, and GSTR-9/9C annual reconciliation (exempt up to ₹2 Cr).
+   - NEVER invent non-existent portal tabs (such as "Rate Schedule download", "Product/Service Details menu", or "Documents tab").
+5. SOURCE HIERARCHY: Primary Gazette notifications, statutes, and Court rulings override secondary commentary. ICAI Technical Guides provide authoritative CA reporting standards.
 
 CRITICAL INLINE CITATION AND LINKING INSTRUCTIONS:
 1. Every time you refer to a statutory section, rule, circular, notification, or judicial precedent present in the verified evidence, you MUST embed its exact official URL as a clickable Markdown link within the sentence:
-   Format: `[Section / Circular / Case Name](Official URL)`
+   Format: `[Section / Notification / Circular / Case Name](Official URL)`
    Examples:
-   - "...as provided under [Section 16(2) of the CGST Act, 2017](https://taxinformation.cbic.gov.in/...), input tax credit is subject to..."
-   - "...further clarified by CBIC vide [Circular No. 183/15/2022-GST](https://cbic.gov.in/...)..."
-   - "...the Supreme Court in [Union of India v. Mohit Minerals](https://sci.gov.in/...) held that..."
-2. Base your legal reasoning strictly on genuine Indian GST law. Do not hallucinate fictitious circular numbers or non-existent web links.
+   - "...as provided under [Section XX(Y) of the CGST Act, 2017](Official URL), input tax credit is subject to..."
+   - "...notified vide [Notification No. XX/YYYY-Central Tax (Rate)](Official URL)..."
+   - "...further clarified by CBIC vide [Circular No. XX/YY/ZZZZ-GST](Official URL)..."
+   - "...the Supreme Court in [Case Name v. Union of India](Official URL) held that..."
+2. Base your legal reasoning strictly on genuine Indian GST law. Do not hallucinate fictitious circular numbers or borrow placeholder names. Cite ONLY actual Notifications, Circulars, or Judgments found in the Verified Official Statutory Evidence.
 
 Draft your response using the following lightweight section structure:
 

@@ -56,12 +56,21 @@ async def evidence_compiler_node(state: ResearchState) -> dict:
         sha_hash = doc.get("sha256_hash") or ""
 
         # Detect statutory references in text
+        notifs_found = re.findall(
+            r"Notification\s+No\.?\s*\d+/\d{4}[-\s]*(?:Central\s+Tax(?:\s*\(Rate\))?|Integrated\s+Tax(?:\s*\(Rate\))?|Compensation\s+Cess(?:\s*\(Rate\))?|Union\s+Territory\s+Tax(?:\s*\(Rate\))?|CT(?:\s*\(Rate\))?|IT(?:\s*\(Rate\))?)",
+            text,
+            flags=re.IGNORECASE,
+        )
         sections_found = re.findall(r"Section\s+\d+(?:\([0-9a-zA-Z]+\))*", text, flags=re.IGNORECASE)
         rules_found = re.findall(r"Rule\s+\d+[A-Z]?(?:\([0-9a-zA-Z]+\))*", text, flags=re.IGNORECASE)
         circulars_found = re.findall(r"Circular\s+No\.?\s*[\d/]+(?:\-GST)?", text, flags=re.IGNORECASE)
 
         legal_ref = ""
-        if sections_found:
+        if notifs_found:
+            legal_ref = ", ".join(dict.fromkeys(notifs_found[:2]))
+            if sections_found:
+                legal_ref += f" (with {', '.join(dict.fromkeys(sections_found[:2]))})"
+        elif sections_found:
             legal_ref = ", ".join(dict.fromkeys(sections_found[:3]))
         elif rules_found:
             legal_ref = ", ".join(dict.fromkeys(rules_found[:3]))

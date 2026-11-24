@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -96,6 +97,22 @@ async def answer_generator_node(state: ResearchState) -> dict:
             HumanMessage(content=prompt),
         ])
         content_text = response.content if isinstance(response.content, str) else str(response.content)
+
+        # Post-generation guard: Intercept any prompt-leak of Circular 183 if ungrounded in evidence
+        if "183/15/2022" in content_text and "183/15/2022" not in evidence_str:
+            logger.warning("Intercepted prompt-leak of Circular 183/15/2022-GST not present in retrieved evidence.")
+            content_text = re.sub(
+                r"\[Circular\s+No\.?\s*183/15/2022-GST\]\([^)]+\)",
+                "applicable CBIC rate notification",
+                content_text,
+                flags=re.IGNORECASE,
+            )
+            content_text = re.sub(
+                r"Circular\s+No\.?\s*183/15/2022-GST",
+                "applicable CBIC rate notification",
+                content_text,
+                flags=re.IGNORECASE,
+            )
 
         return {
             "current_step": "answer_generator",
