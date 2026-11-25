@@ -14,6 +14,7 @@ from backend.app.api.research import router as research_router
 from backend.app.core.config import settings
 from backend.app.llm.factory import llm_factory
 from backend.app.schemas.api import ConfigStatusResponse
+from backend.app.tools.search.searxng_adapter import SearXNGSearchAdapter
 
 # Configure logging
 logging.basicConfig(
@@ -45,10 +46,22 @@ app.include_router(research_router, prefix=api_v1_prefix)
 app.include_router(documents_router, prefix=api_v1_prefix)
 
 
+async def _check_search_health() -> tuple[bool, str]:
+    """Evaluates search provider readiness and reachability."""
+    if settings.SEARCH_PROVIDER == "mock":
+        return True, "Mock search adapter active"
+    if settings.SEARCH_PROVIDER == "searxng":
+        if not settings.is_search_configured:
+            return False, "SearXNG base URL is not configured."
+        return await SearXNGSearchAdapter().health_check()
+    return False, f"Unsupported search provider: {settings.SEARCH_PROVIDER}"
+
+
 @app.get("/api/v1/health")
 async def health_check() -> dict:
     """Basic health check endpoint."""
     llm_ok, llm_msg = await llm_factory.health_check() if llm_factory.is_configured() else (False, "LLM Not Configured")
+    search_ok, search_msg = await _check_search_health()
     return {
         "status": "healthy",
         "app_name": settings.APP_NAME,
@@ -61,7 +74,10 @@ async def health_check() -> dict:
         },
         "search_status": {
             "configured": settings.is_search_configured,
+            "reachable": search_ok,
             "provider": settings.SEARCH_PROVIDER,
+            "base_url": settings.SEARXNG_BASE_URL if settings.SEARCH_PROVIDER == "searxng" else None,
+            "message": search_msg,
         },
     }
 
@@ -78,6 +94,8 @@ async def config_status() -> ConfigStatusResponse:
     except Exception:
         data_writable = False
 
+    search_ok, search_msg = await _check_search_health()
+
     return ConfigStatusResponse(
         app_name=settings.APP_NAME,
         app_env=settings.APP_ENV,
@@ -86,6 +104,9 @@ async def config_status() -> ConfigStatusResponse:
         llm_model=settings.LLM_MODEL,
         search_configured=settings.is_search_configured,
         search_provider=settings.SEARCH_PROVIDER,
+        search_reachable=search_ok,
+        search_base_url=settings.SEARXNG_BASE_URL if settings.SEARCH_PROVIDER == "searxng" else None,
+        search_status_message=search_msg,
         official_domains_count=len(settings.allowed_domains),
         data_dir_writable=data_writable,
     )

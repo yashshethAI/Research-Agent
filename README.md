@@ -62,7 +62,7 @@ The system is organized into three clean, decoupled layers:
 3. **`fact_extraction`**: Isolates material facts, uploaded attachments, and formulates clear assumptions.
 4. **`research_planner`**: Outlines target Acts (CGST/IGST), Rules, Notifications, Circulars, and Precedents.
 5. **`search_query_generation`**: Formulates sanitized search queries restricted to official domains.
-6. **`official_source_search`**: Discovers official documents via search adapter (Tavily or hermetic test mock).
+6. **`official_source_search`**: Discovers official documents via search adapter (local SearXNG or hermetic test mock).
 7. **`source_fetcher`**: Retrieves original web pages and PDFs via HTTPX with SSRF and redirect guards.
 8. **`document_extractor`**: Parses HTML (BeautifulSoup4) and PDF (PyMuPDF) with SHA-256 document hashing.
 9. **`evidence_compiler`**: Synthesizes verified excerpts, assigning stable IDs (`SRC-001`, `SRC-002`).
@@ -137,8 +137,10 @@ cp .env.example .env
 | `LLM_API_KEY` | Optional API token for inference server | *(Empty or `none`)* |
 | `LLM_MODEL` | Served model name | `default` |
 | `LLM_TEMPERATURE` | Generation temperature | `0.0` |
-| `SEARCH_PROVIDER` | Search adapter (`tavily` or `mock`) | `tavily` |
-| `TAVILY_API_KEY` | API key from Tavily for live official search | *(Configure for live search)* |
+| `SEARCH_PROVIDER` | Search adapter (`searxng` or `mock`) | `searxng` |
+| `SEARXNG_BASE_URL` | Base URL of local or private SearXNG instance | `http://localhost:8080` |
+| `SEARXNG_TIMEOUT` | SearXNG HTTP request timeout in seconds | `30` |
+| `SEARXNG_ENGINES` | Optional comma-separated SearXNG engines override | *(Default engines)* |
 | `ENFORCE_OFFICIAL_DOMAINS` | Restrict fetching strictly to official GST portals | `true` |
 | `DATA_DIR` | Local storage root path | `./data` |
 
@@ -233,7 +235,7 @@ GST_AGENT/
 │       │   ├── pdf_parser.py           # PyMuPDF notification/circular extractor
 │       │   └── search/                 # Provider-independent search
 │       │       ├── base.py             # Search interface & privacy sanitizer
-│       │       ├── tavily_adapter.py   # Tavily official search adapter
+│       │       ├── searxng_adapter.py  # SearXNG official search adapter
 │       │       └── mock_adapter.py     # Offline GST test adapter
 │       ├── storage/                    # Filesystem persistence engine
 │       │   ├── conversations.py        # Thread-safe JSONL conversation store
