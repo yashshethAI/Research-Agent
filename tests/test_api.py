@@ -4,28 +4,42 @@ import json
 
 from starlette.testclient import TestClient
 
+from backend.app.core.config import settings
 from backend.app.llm.factory import llm_factory
 from backend.app.main import app
+from backend.app.tools.search.searxng_adapter import SearXNGSearchAdapter
 
 client = TestClient(app)
 
 
-def test_api_health_endpoint():
+def test_api_health_endpoint(monkeypatch):
+    async def mock_health(self):
+        return True, "SearXNG reachable at http://localhost:8080"
+
+    monkeypatch.setattr(SearXNGSearchAdapter, "health_check", mock_health)
     response = client.get("/api/v1/health")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "healthy"
     assert "llm_status" in data
     assert "search_status" in data
+    assert data["search_status"]["provider"] == settings.SEARCH_PROVIDER
+    assert "reachable" in data["search_status"]
 
 
-def test_api_config_status_endpoint():
+def test_api_config_status_endpoint(monkeypatch):
+    async def mock_health(self):
+        return False, "SearXNG health check failed: connection refused"
+
+    monkeypatch.setattr(SearXNGSearchAdapter, "health_check", mock_health)
     response = client.get("/api/v1/config/status")
     assert response.status_code == 200
     data = response.json()
     assert "app_name" in data
     assert "llm_configured" in data
     assert "search_configured" in data
+    assert data["search_provider"] == settings.SEARCH_PROVIDER
+    assert "search_reachable" in data
     assert data["data_dir_writable"] is True
 
 
