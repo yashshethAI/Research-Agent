@@ -33,7 +33,12 @@ async def citation_validator_node(state: ResearchState) -> dict:
 
     # If no evidence was found, evaluate retry condition
     should_refine = False
-    if not evidence_records and retry_count < settings.MAX_RESEARCH_RETRIES and settings.SEARCH_PROVIDER == "tavily" and settings.TAVILY_API_KEY:
+    if (
+        not evidence_records
+        and retry_count < settings.MAX_RESEARCH_RETRIES
+        and settings.SEARCH_PROVIDER == "searxng"
+        and settings.is_search_configured
+    ):
         should_refine = True
         new_retry = retry_count + 1
         logger.info(f"Evidence insufficient. Triggering research refinement loop (attempt {new_retry}/{settings.MAX_RESEARCH_RETRIES})")

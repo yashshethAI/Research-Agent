@@ -13,15 +13,29 @@ logger = logging.getLogger(__name__)
 def _identify_authority(domain: str) -> str:
     d = domain.lower()
     if "taxinformation.cbic.gov.in" in d or "cbic.gov.in" in d:
-        return "Central Board of Indirect Taxes and Customs (CBIC)"
+        return "Central Board of Indirect Taxes and Customs (CBIC) [Statutory]"
     if "gst.gov.in" in d:
-        return "Goods and Services Tax Network (GSTN)"
+        return "Goods and Services Tax Network (GSTN) [Portal Operations]"
     if "gstcouncil.gov.in" in d:
-        return "GST Council Secretariat"
+        return "GST Council Secretariat [Policy Recommendations]"
     if "sci.gov.in" in d:
-        return "Supreme Court of India"
+        return "Supreme Court of India [Binding Landmark Precedent]"
+    if "indiankanoon.org" in d:
+        return "Judicial Precedent via Indian Kanoon [Court Ruling]"
+    if "icai.org" in d:
+        return "Institute of Chartered Accountants of India (ICAI) [Authoritative CA Guidance]"
+    if "icsi.edu" in d:
+        return "Institute of Company Secretaries of India (ICSI) [Corporate Governance Guidance]"
+    if "cestat" in d:
+        return "Customs, Excise and Service Tax Appellate Tribunal (CESTAT) [Appellate Precedent]"
+    if "taxmann.com" in d:
+        return "Tax Law Reporter (Taxmann) [Secondary Commentary]"
+    if "livelaw.in" in d or "barandbench.com" in d:
+        return "Legal Case Reporter (LiveLaw / Bar & Bench) [Judicial Report]"
+    if "taxguru.in" in d or "cleartax.in" in d:
+        return "Tax Practice Portal [Procedural Explainer]"
     if "court" in d or "judiciary" in d:
-        return "High Court / Appellate Tribunal"
+        return "High Court / Appellate Tribunal [Judicial Precedent]"
     return "Official GST Authority"
 
 
@@ -42,12 +56,21 @@ async def evidence_compiler_node(state: ResearchState) -> dict:
         sha_hash = doc.get("sha256_hash") or ""
 
         # Detect statutory references in text
+        notifs_found = re.findall(
+            r"Notification\s+No\.?\s*\d+/\d{4}[-\s]*(?:Central\s+Tax(?:\s*\(Rate\))?|Integrated\s+Tax(?:\s*\(Rate\))?|Compensation\s+Cess(?:\s*\(Rate\))?|Union\s+Territory\s+Tax(?:\s*\(Rate\))?|CT(?:\s*\(Rate\))?|IT(?:\s*\(Rate\))?)",
+            text,
+            flags=re.IGNORECASE,
+        )
         sections_found = re.findall(r"Section\s+\d+(?:\([0-9a-zA-Z]+\))*", text, flags=re.IGNORECASE)
         rules_found = re.findall(r"Rule\s+\d+[A-Z]?(?:\([0-9a-zA-Z]+\))*", text, flags=re.IGNORECASE)
         circulars_found = re.findall(r"Circular\s+No\.?\s*[\d/]+(?:\-GST)?", text, flags=re.IGNORECASE)
 
         legal_ref = ""
-        if sections_found:
+        if notifs_found:
+            legal_ref = ", ".join(dict.fromkeys(notifs_found[:2]))
+            if sections_found:
+                legal_ref += f" (with {', '.join(dict.fromkeys(sections_found[:2]))})"
+        elif sections_found:
             legal_ref = ", ".join(dict.fromkeys(sections_found[:3]))
         elif rules_found:
             legal_ref = ", ".join(dict.fromkeys(rules_found[:3]))

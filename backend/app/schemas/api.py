@@ -36,6 +36,9 @@ class ConfigStatusResponse(BaseModel):
     llm_model: str | None = None
     search_configured: bool
     search_provider: str
+    search_reachable: bool = False
+    search_base_url: str | None = None
+    search_status_message: str | None = None
     official_domains_count: int
     data_dir_writable: bool
 

@@ -40,20 +40,29 @@ def render_sidebar(
         st.markdown("#### 🔌 Engine Status")
         llm_ready = config_status.get("llm_configured", False)
         search_ready = config_status.get("search_configured", False)
-        search_provider = config_status.get("search_provider", "tavily")
+        search_reachable = config_status.get("search_reachable")
+        search_provider = config_status.get("search_provider", "searxng")
+        search_base_url = config_status.get("search_base_url")
+        search_status_msg = config_status.get("search_status_message")
 
         if llm_ready:
             st.success(f"🟢 LLM: {config_status.get('llm_model') or 'Configured'}", icon="✅")
         else:
             st.warning("🟠 LLM: Not Configured (OpenAI-compatible)", icon="⚠️")
 
-        if search_ready:
-            st.success(f"🟢 Search: {search_provider.upper()} Ready", icon="🔍")
+        if not search_ready:
+            st.warning(f"⚪ Search: {search_provider.upper()} URL Required", icon="ℹ️")
+        elif search_reachable is False:
+            st.warning(f"🟠 Search: {search_provider.upper()} Unreachable", icon="⚠️")
+            if search_status_msg:
+                st.caption(search_status_msg)
         else:
-            st.info(f"⚪ Search: {search_provider.upper()} Key Required", icon="ℹ️")
+            st.success(f"🟢 Search: {search_provider.upper()} Ready", icon="🔍")
 
         with st.expander("🛠️ Connection Details", expanded=False):
             st.write(f"**Base URL:** `{config_status.get('llm_base_url') or 'Not Set'}`")
+            st.write(f"**Search Provider:** `{search_provider}`")
+            st.write(f"**Search URL:** `{search_base_url or 'Not Set'}`")
             st.write(f"**Allowed Domains:** {config_status.get('official_domains_count', 0)} official portals")
             st.write("**Storage Engine:** Filesystem (Local)")
 

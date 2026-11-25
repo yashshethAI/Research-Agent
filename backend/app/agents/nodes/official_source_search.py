@@ -6,7 +6,7 @@ from backend.app.agents.state import ResearchState
 from backend.app.core.config import settings
 from backend.app.tools.search.base import SearchNotConfiguredError, SearchResult
 from backend.app.tools.search.mock_adapter import MockSearchAdapter
-from backend.app.tools.search.tavily_adapter import TavilySearchAdapter
+from backend.app.tools.search.searxng_adapter import SearXNGSearchAdapter
 from backend.app.tools.source_validator import source_validator
 
 logger = logging.getLogger(__name__)
@@ -24,8 +24,19 @@ async def official_source_search_node(state: ResearchState) -> dict:
     # Instantiate adapter
     if settings.SEARCH_PROVIDER == "mock":
         adapter = MockSearchAdapter()
+    elif settings.SEARCH_PROVIDER == "searxng":
+        adapter = SearXNGSearchAdapter()
     else:
-        adapter = TavilySearchAdapter()
+        return {
+            "current_step": "official_source_search",
+            "error_message": f"Unsupported search provider: {settings.SEARCH_PROVIDER}",
+            "search_results": [],
+        }
+
+    # Determine automated recency filter
+    q_lower = (state.query or "").lower()
+    recency_keywords = ["latest", "recent", "amendment", "amendments", "new", "update", "updates", "current"]
+    time_range = "year" if any(w in q_lower for w in recency_keywords) else None
 
     aggregated_results: list[SearchResult] = []
     seen_urls = set()
@@ -36,6 +47,7 @@ async def official_source_search_node(state: ResearchState) -> dict:
                 query=q,
                 domains=settings.allowed_domains,
                 max_results=settings.MAX_SEARCH_RESULTS,
+                time_range=time_range,
             )
             for r in results:
                 # Filter through source validator

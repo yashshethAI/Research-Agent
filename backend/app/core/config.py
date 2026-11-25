@@ -32,10 +32,13 @@ class Settings(BaseSettings):
     LLM_TIMEOUT: int = 180
     LLM_MAX_RETRIES: int = 2
 
-    # Web Search
-    SEARCH_PROVIDER: str = "tavily"
-    TAVILY_API_KEY: str | None = None
-    MAX_SEARCH_RESULTS: int = 10
+    # Web Search (Local-First SearXNG)
+    SEARCH_PROVIDER: str = "searxng"
+    SEARXNG_BASE_URL: str = "http://localhost:8080"
+    SEARXNG_TIMEOUT: int = 30
+    SEARXNG_ENGINES: str | None = None
+    MAX_SEARCH_RESULTS: int = 20
+    MAX_FETCH_SOURCES: int = 8
     MAX_RESEARCH_RETRIES: int = 2
 
     # Source Validation & Security
@@ -63,11 +66,11 @@ class Settings(BaseSettings):
 
     @property
     def is_search_configured(self) -> bool:
-        """Returns True if search credentials are valid for the selected provider."""
+        """Returns True if search configuration is valid for the selected provider."""
         if self.SEARCH_PROVIDER == "mock":
             return True
-        if self.SEARCH_PROVIDER == "tavily":
-            return bool(self.TAVILY_API_KEY and self.TAVILY_API_KEY.strip())
+        if self.SEARCH_PROVIDER == "searxng":
+            return bool(self.SEARXNG_BASE_URL and self.SEARXNG_BASE_URL.strip())
         return False
 
     @property
@@ -136,6 +139,45 @@ class Settings(BaseSettings):
                 if cleaned and cleaned not in domains:
                     domains.append(cleaned)
         return domains
+
+    def get_priority_search_domains(self, max_domains: int = 12) -> list[str]:
+        """Returns priority-ordered canonical root domains across official sources."""
+        registry = self.get_sources_registry()
+        sources = sorted(
+            registry.get("official_sources", []),
+            key=lambda s: s.get("priority", 99),
+        )
+
+        source_domain_lists: list[list[str]] = []
+        for s in sources:
+            raw = [d.strip().lower() for d in s.get("domains", []) if d and d.strip()]
+            raw_set = set(raw)
+            deduped: list[str] = []
+            for d in raw:
+                canonical = d[4:] if d.startswith("www.") and d[4:] in raw_set else d
+                if canonical not in deduped:
+                    deduped.append(canonical)
+            if deduped:
+                source_domain_lists.append(deduped)
+
+        selected: list[str] = []
+        # First pass: take primary canonical domain from each source in priority order
+        for d_list in source_domain_lists:
+            primary = d_list[0]
+            if primary not in selected:
+                selected.append(primary)
+                if len(selected) >= max_domains:
+                    return selected
+
+        # Second pass: backfill secondary domains if still below max_domains
+        for d_list in source_domain_lists:
+            for d in d_list[1:]:
+                if d not in selected:
+                    selected.append(d)
+                    if len(selected) >= max_domains:
+                        return selected
+
+        return selected
 
 
 # Global settings singleton

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from datetime import datetime, timedelta, timezone
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -70,7 +72,18 @@ async def answer_generator_node(state: ResearchState) -> dict:
         f"Adopted Assumptions:\n{json.dumps(state.assumptions, indent=2)}"
     )
 
+    # Compute live Indian tax calendar context
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    now = datetime.now(ist_tz)
+    current_date_str = now.strftime("%d %B %Y")
+    current_year = now.year
+    current_fy = f"FY {current_year}-{str(current_year + 1)[-2:]}" if now.month >= 4 else f"FY {current_year - 1}-{str(current_year)[-2:]}"
+    preceding_fy = f"FY {current_year - 1}-{str(current_year)[-2:]}" if now.month >= 4 else f"FY {current_year - 2}-{str(current_year - 1)[-2:]}"
+
     prompt = UNIFIED_GST_LEGAL_REASONING_PROMPT.format(
+        current_date=current_date_str,
+        current_fy=current_fy,
+        preceding_fy=preceding_fy,
         query=state.query,
         facts=facts_summary,
         evidence=evidence_str,
@@ -84,6 +97,22 @@ async def answer_generator_node(state: ResearchState) -> dict:
             HumanMessage(content=prompt),
         ])
         content_text = response.content if isinstance(response.content, str) else str(response.content)
+
+        # Post-generation guard: Intercept any prompt-leak of Circular 183 if ungrounded in evidence
+        if "183/15/2022" in content_text and "183/15/2022" not in evidence_str:
+            logger.warning("Intercepted prompt-leak of Circular 183/15/2022-GST not present in retrieved evidence.")
+            content_text = re.sub(
+                r"\[Circular\s+No\.?\s*183/15/2022-GST\]\([^)]+\)",
+                "applicable CBIC rate notification",
+                content_text,
+                flags=re.IGNORECASE,
+            )
+            content_text = re.sub(
+                r"Circular\s+No\.?\s*183/15/2022-GST",
+                "applicable CBIC rate notification",
+                content_text,
+                flags=re.IGNORECASE,
+            )
 
         return {
             "current_step": "answer_generator",
