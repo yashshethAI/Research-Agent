@@ -11,6 +11,20 @@ from backend.app.tools.source_validator import SourceSecurityError, source_valid
 
 logger = logging.getLogger(__name__)
 
+# Try importing playwright for conditional SPA rendering
+try:
+    from playwright.async_api import async_playwright
+
+    _HAS_PLAYWRIGHT = True
+except ImportError:
+    _HAS_PLAYWRIGHT = False
+    logger.info("playwright not installed; SPA rendering fallback is unavailable.")
+
+# Tier 1/2 domains allowed for Playwright rendering (anti-SSRF safeguard)
+_PLAYWRIGHT_ALLOWED_DOMAINS = frozenset(
+    d.lower() for d in [*settings.official_domains, *settings.verified_secondary_domains]
+)
+
 
 class FetchedDocument:
     def __init__(
@@ -129,6 +143,65 @@ class SafeFetcher:
                 )
 
             raise SourceSecurityError("Exceeded maximum redirects (5) during fetch.")
+
+    async def fetch_rendered_html(self, url: str) -> FetchedDocument | None:
+        """Renders a JS-heavy SPA page using headless Playwright Chromium.
+
+        Strictly limited to Tier 1/2 allowlisted domains with anti-SSRF checks.
+        Returns None if Playwright is unavailable or the domain is not allowlisted.
+        """
+        if not _HAS_PLAYWRIGHT:
+            logger.warning("Playwright not installed; cannot render SPA page.")
+            return None
+
+        # Anti-SSRF: only render Tier 1/2 allowlisted domains
+        hostname = (urlparse(url).hostname or "").lower()
+        if not any(hostname == d or hostname.endswith("." + d) for d in _PLAYWRIGHT_ALLOWED_DOMAINS):
+            logger.warning(f"Playwright render denied for non-allowlisted domain: {hostname}")
+            return None
+
+        # Additional SSRF check via source_validator
+        try:
+            source_validator.assert_valid_url(url, allow_unverified=False)
+        except Exception:
+            logger.warning(f"Playwright SSRF check failed for {url}")
+            return None
+
+        try:
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True)
+                try:
+                    page = await browser.new_page()
+                    await page.goto(url, wait_until="networkidle", timeout=15000)
+                    rendered_html = await page.content()
+                finally:
+                    await browser.close()
+
+            content_bytes = rendered_html.encode("utf-8")
+            if len(content_bytes) > self.max_size_bytes:
+                logger.warning(f"Playwright rendered content too large for {url}")
+                return None
+
+            domain = urlparse(url).hostname or "unknown"
+            doc_hash, path = source_cache_storage.save_document(
+                url=url,
+                domain=domain,
+                content=content_bytes,
+                extension="html",
+                metadata={"content_type": "text/html", "fetch_method": "playwright"},
+            )
+
+            return FetchedDocument(
+                url=url,
+                content=content_bytes,
+                content_type="text/html",
+                status_code=200,
+                sha256_hash=doc_hash,
+                file_path=str(path),
+            )
+        except Exception as e:
+            logger.error(f"Playwright rendering failed for {url}: {e}")
+            return None
 
 
 # Global instance

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -23,6 +24,39 @@ _DEFAULT_SINGLE_GROUP_LIMIT = 8
 _CHUNK_SIZE = 6
 _MAX_DOMAIN_GROUPS = 2
 _RATE_LIMIT_MARKERS = ("captcha", "too many requests", "suspended", "rate limit", "429")
+
+# ---------------------------------------------------------------------------
+# In-memory TTL cache for SearXNG results (600s, max 128 entries)
+# ---------------------------------------------------------------------------
+_TTL_SECONDS = 600
+_MAX_CACHE_SIZE = 128
+_result_cache: dict[tuple[str, str | None], tuple[float, list[SearchResult]]] = {}
+
+
+def _cache_get(key: tuple[str, str | None]) -> list[SearchResult] | None:
+    """Return cached results if present and not expired, else None."""
+    entry = _result_cache.get(key)
+    if entry is None:
+        return None
+    ts, results = entry
+    if time.monotonic() - ts > _TTL_SECONDS:
+        _result_cache.pop(key, None)
+        return None
+    return results
+
+
+def _cache_put(key: tuple[str, str | None], results: list[SearchResult]) -> None:
+    """Store results in cache, evicting oldest entries if over capacity."""
+    # Evict expired entries first
+    now = time.monotonic()
+    expired = [k for k, (ts, _) in _result_cache.items() if now - ts > _TTL_SECONDS]
+    for k in expired:
+        _result_cache.pop(k, None)
+    # Evict oldest if still over limit
+    while len(_result_cache) >= _MAX_CACHE_SIZE:
+        oldest_key = min(_result_cache, key=lambda k: _result_cache[k][0])
+        _result_cache.pop(oldest_key, None)
+    _result_cache[key] = (now, results)
 
 
 def _dedupe_www_domains(domains: list[str]) -> list[str]:
@@ -48,15 +82,23 @@ class SearXNGSearchAdapter(BaseSearchProvider):
         base_url: str | None = None,
         timeout: int | None = None,
         engines: str | None = None,
+        use_site_operators: bool | None = None,
     ):
         raw_url = base_url if base_url is not None else settings.SEARXNG_BASE_URL
         self.base_url = raw_url.strip().rstrip("/") if raw_url else ""
         self.timeout = timeout if timeout is not None else settings.SEARXNG_TIMEOUT
         raw_engines = engines if engines is not None else settings.SEARXNG_ENGINES
         self.engines = raw_engines.strip() if raw_engines and raw_engines.strip() else None
+        self.use_site_operators = (
+            use_site_operators if use_site_operators is not None else settings.SEARXNG_USE_SITE_OPERATORS
+        )
 
     def _build_effective_queries(self, query: str, domains: list[str] | None) -> list[str]:
-        """Injects concise 'site:' domain filters when the query does not already specify one."""
+        """Injects concise 'site:' domain filters when use_site_operators is True and query has none."""
+        # If site: operators are disabled, return the clean query as-is
+        if not self.use_site_operators:
+            return [query]
+
         if "site:" in query.lower() or not domains:
             return [query]
 
@@ -115,6 +157,13 @@ class SearXNGSearchAdapter(BaseSearchProvider):
         effective_query: str,
         time_range: str | None,
     ) -> list[SearchResult]:
+        # Check TTL cache first
+        cache_key = (effective_query, time_range)
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            logger.debug(f"SearXNG cache hit for '{effective_query[:50]}' (time_range={time_range})")
+            return cached
+
         search_url = f"{self.base_url}/search"
         headers = {
             "Accept": "application/json",
@@ -177,6 +226,9 @@ class SearXNGSearchAdapter(BaseSearchProvider):
                     score=score,
                 )
             )
+
+        # Store in cache
+        _cache_put(cache_key, results)
         return results
 
     async def search(
@@ -208,11 +260,24 @@ class SearXNGSearchAdapter(BaseSearchProvider):
                 return await self._query_single(client, q_str, time_range)
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            tasks = [
-                _throttled_query(idx, q)
-                for idx, q in enumerate(effective_queries)
-            ]
-            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+            if self.use_site_operators and len(effective_queries) > 1:
+                # Sequential chunk fallback: query group 0 first, group 1 only if < 5 hits
+                first_results = await self._query_single(client, effective_queries[0], time_range)
+                if len(first_results) >= 5:
+                    batch_results: list[list[SearchResult] | Exception] = [first_results]
+                else:
+                    remaining_tasks = [
+                        _throttled_query(idx, q)
+                        for idx, q in enumerate(effective_queries[1:], 1)
+                    ]
+                    remaining = await asyncio.gather(*remaining_tasks, return_exceptions=True)
+                    batch_results = [first_results, *remaining]
+            else:
+                tasks = [
+                    _throttled_query(idx, q)
+                    for idx, q in enumerate(effective_queries)
+                ]
+                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         merged_by_url: dict[str, SearchResult] = {}
         errors: list[Exception] = []

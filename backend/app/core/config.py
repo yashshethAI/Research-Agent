@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     SEARXNG_BASE_URL: str = "http://localhost:8080"
     SEARXNG_TIMEOUT: int = 30
     SEARXNG_ENGINES: str | None = None
+    SEARXNG_USE_SITE_OPERATORS: bool = False
     MAX_SEARCH_RESULTS: int = 20
     MAX_FETCH_SOURCES: int = 8
     MAX_RESEARCH_RETRIES: int = 2

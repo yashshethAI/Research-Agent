@@ -128,6 +128,7 @@ async def config_status() -> ConfigStatusResponse:
         official_domains_count=len(settings.official_domains),
         verified_secondary_domains_count=len(settings.verified_secondary_domains),
         allow_unverified_fallback=settings.ALLOW_UNVERIFIED_FALLBACK,
+        search_use_site_operators=settings.SEARXNG_USE_SITE_OPERATORS,
         data_dir_writable=data_writable,
     )
 

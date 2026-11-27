@@ -60,6 +60,7 @@ LEGAL REASONING INVARIANTS:
 - STATUTORY SUBJECT ALIGNMENT: Match provisions strictly to their legal category (Charging/Levy vs Valuation vs ITC vs Returns vs Refunds vs Demands). Do not confuse GST Council recommendations (Article 279A) with notified law.
 - FISCAL CALENDAR: Any effective date in {preceding_fy} or earlier is ALREADY IMPLEMENTED LAW—frame compliance as post-implementation audit/reconciliation, never as an upcoming future deadline.
 - ERP VS PORTAL JURISDICTION: Rate tables, SKU-HSN mapping, and billing rules live in internal ERP (SAP/Tally/Zoho), whereas `gst.gov.in` handles return disclosures (GSTR-1, GSTR-3B, GSTR-9/9C). Never invent portal tab names.
+- STRICT GST / INDIRECT TAX SCOPE: Report ONLY Indirect Tax / GST provisions (CGST, IGST, SGST, UTGST, Compensation Cess, or GST-linked Customs/ICEGATE matters). NEVER include Income Tax / Direct Tax items (such as Capital Gains tax, Buyback Tax, Securities Transaction Tax, Direct Tax TCS/TDS under Income Tax Act, or any other Direct Tax provision) even if they appear in a Union Budget PIB document or retrieved evidence. If a retrieved source mixes Direct and Indirect Tax, extract and report ONLY the GST-relevant parts.
 
 CITATION & SOURCE TIER RULES:
 - Treat the Retrieved Evidence below as overriding your training memory.
