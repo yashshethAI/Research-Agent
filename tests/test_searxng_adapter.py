@@ -315,3 +315,28 @@ async def test_retrieve_evidence_escalates_tier1_to_tier2_and_tier3(monkeypatch)
     monkeypatch.setattr(settings, "ALLOW_UNVERIFIED_FALLBACK", False)
     out2_disabled = await retrieve_evidence_node(state2)
     assert out2_disabled["should_refine_search"] is False
+
+
+@pytest.mark.asyncio
+async def test_searxng_detects_unresponsive_rate_limit_engines(monkeypatch):
+    def handler_rate_limited(url, params, headers):
+        return httpx.Response(
+            200,
+            json={
+                "results": [],
+                "unresponsive_engines": [["duckduckgo", "CAPTCHA"], ["google cse", "Suspended: too many requests"]],
+            },
+        )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler_rate_limited, **kwargs))
+    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080")
+    with pytest.raises(RuntimeError, match="blocked/rate-limited"):
+        await adapter.search("corporate guarantee GST")
+
+    # Verify retrieve_evidence records SearchEngineRateLimitError cleanly in node_errors and halts pointless tier loop
+    monkeypatch.setattr(settings, "SEARCH_PROVIDER", "searxng")
+    monkeypatch.setattr(settings, "SEARXNG_BASE_URL", "http://localhost:8080")
+    state = ResearchState(query="corporate guarantee GST", search_queries=["corporate guarantee rule 28(2)"], search_tier="official")
+    out = await retrieve_evidence_node(state)
+    assert out["should_refine_search"] is False
+    assert any(err["error_type"] == "SearchEngineRateLimitError" for err in out["node_errors"])

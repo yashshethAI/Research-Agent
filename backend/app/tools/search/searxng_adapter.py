@@ -10,6 +10,7 @@ import httpx
 from backend.app.core.config import settings
 from backend.app.tools.search.base import (
     BaseSearchProvider,
+    SearchEngineRateLimitError,
     SearchNotConfiguredError,
     SearchResult,
     sanitize_search_query,
@@ -21,6 +22,7 @@ _VALID_TIME_RANGES = {"day", "week", "month", "year"}
 _DEFAULT_SINGLE_GROUP_LIMIT = 8
 _CHUNK_SIZE = 6
 _MAX_DOMAIN_GROUPS = 2
+_RATE_LIMIT_MARKERS = ("captcha", "too many requests", "suspended", "rate limit", "429")
 
 
 def _dedupe_www_domains(domains: list[str]) -> list[str]:
@@ -140,6 +142,19 @@ class SearXNGSearchAdapter(BaseSearchProvider):
 
         data = resp.json()
         raw_results = data.get("results", [])
+        unresponsive = data.get("unresponsive_engines") or []
+
+        if unresponsive:
+            unresponsive_msgs = [
+                f"{item[0]}: {item[1]}" if isinstance(item, (list, tuple)) and len(item) >= 2 else str(item)
+                for item in unresponsive
+            ]
+            summary = "; ".join(unresponsive_msgs)
+            logger.warning(f"SearXNG unresponsive engines for '{effective_query[:60]}': {summary}")
+            if not raw_results and any(m in summary.lower() for m in _RATE_LIMIT_MARKERS):
+                raise SearchEngineRateLimitError(
+                    f"SearXNG upstream engines blocked/rate-limited ({summary})"
+                )
 
         results: list[SearchResult] = []
         for item in raw_results:
@@ -184,10 +199,18 @@ class SearXNGSearchAdapter(BaseSearchProvider):
         allowed_domains = domains if domains is not None else settings.allowed_domains
         effective_queries = self._build_effective_queries(sanitized_query, allowed_domains)
 
+        sem = asyncio.Semaphore(2)
+
+        async def _throttled_query(idx: int, q_str: str) -> list[SearchResult]:
+            async with sem:
+                if idx > 0:
+                    await asyncio.sleep(0.2)
+                return await self._query_single(client, q_str, time_range)
+
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             tasks = [
-                self._query_single(client, q, time_range)
-                for q in effective_queries
+                _throttled_query(idx, q)
+                for idx, q in enumerate(effective_queries)
             ]
             batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 

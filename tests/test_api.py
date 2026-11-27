@@ -22,6 +22,7 @@ def test_api_health_endpoint(monkeypatch):
     data = response.json()
     assert data["status"] == "healthy"
     assert "llm_status" in data
+    assert "research_llm_status" in data
     assert "search_status" in data
     assert data["search_status"]["provider"] == settings.SEARCH_PROVIDER
     assert "allow_unverified_fallback" in data["search_status"]
@@ -37,6 +38,7 @@ def test_api_config_status_endpoint(monkeypatch):
     data = response.json()
     assert "app_name" in data
     assert "llm_configured" in data
+    assert "research_llm_model" in data
     assert "search_configured" in data
     assert data["search_provider"] == settings.SEARCH_PROVIDER
     assert "official_domains_count" in data

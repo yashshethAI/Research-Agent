@@ -84,6 +84,35 @@ async def synthesize_answer_node(state: ResearchState) -> dict[str, Any]:
                 "execution_trace": trace,
             }
 
+        # Zero-evidence hallucination guard: never let <26B models guess GST law with 0 retrieved sources
+        if not state.evidence_records:
+            tiers_tried = ", ".join(state.attempted_tiers) if state.attempted_tiers else state.search_tier
+            err_lines = [
+                f"- `{e.get('substep')}` ({e.get('error_type')}): {e.get('detail')}"
+                for e in errors
+                if e.get("node") == "retrieve_evidence"
+            ]
+            err_section = (
+                "\n\n**Retrieval Diagnostics:**\n" + "\n".join(err_lines[:5])
+                if err_lines
+                else ""
+            )
+            no_evidence_report = (
+                "[FURTHER VERIFICATION REQUIRED]\n\n"
+                f"No verifiable GST sources could be retrieved across tier(s): `{tiers_tried}`.\n\n"
+                "- **Why no answer was generated**: Answering without retrieved official or secondary sources risks hallucinating GST rates, notifications, or court rulings.\n"
+                "- **Suggested Action**: Check SearXNG engine availability (wait ~1–2 minutes if upstream engines hit CAPTCHA/rate limits), retry the query, or enable `ALLOW_UNVERIFIED_FALLBACK=true` in `.env` if testing open-web fallback."
+                f"{err_section}"
+            )
+            dur = int((time.perf_counter() - t0) * 1000)
+            trace.append(make_trace_entry("synthesize_answer", state.search_tier, "no_evidence", dur))
+            return {
+                "current_step": "synthesize_answer",
+                "final_report": no_evidence_report,
+                "execution_trace": trace,
+                "node_errors": errors,
+            }
+
         # Cap evidence to protect <26B model attention window
         selected_evidence = _prioritize_evidence_for_llm(
             state.evidence_records or [],

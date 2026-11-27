@@ -83,6 +83,13 @@ def test_compile_relevant_evidence_marks_snippet_and_unverified_false():
 
 def test_detect_spa_shell_and_rerank():
     assert detect_spa_shell("<html><body><app-root></app-root>Enable JavaScript</body></html>", "Enable JavaScript") is True
+    assert (
+        detect_spa_shell(
+            "<html><body><div>53rd GST Council Meeting</div></body></html>",
+            "Skip to Main Content\nRTI\nFAQs\n### 53rd GST Council Meeting\n### Archives\n### Useful Links\n### Contact GST Council\nAddress: 5th Floor\nPage last updated on :27/11/2026",
+        )
+        is True
+    )
     assert detect_spa_shell("<html><body><p>Full statutory text...</p></body></html>", "Full statutory text " * 30) is False
 
     hits = [

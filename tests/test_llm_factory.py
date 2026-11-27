@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from backend.app.llm.factory import LLMFactory, LLMNotConfiguredError
+from backend.app.core.config import settings
+from backend.app.llm.factory import LLMFactory, LLMNotConfiguredError, research_llm_factory
 
 
 def test_factory_unconfigured():
@@ -89,3 +90,30 @@ def test_factory_basic_auth_from_url():
     b64 = headers["Authorization"].split(" ")[1]
     decoded = base64.b64decode(b64).decode("utf-8")
     assert decoded == "ngrokuser:ngrokpass"
+
+
+def test_research_llm_factory_uses_research_overrides_and_falls_back(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_BASE_URL", "http://main-llm:8000/v1")
+    monkeypatch.setattr(settings, "LLM_MODEL", "qwen3:14b")
+    monkeypatch.setattr(settings, "LLM_BASIC_AUTH_USERNAME", "mainuser")
+    monkeypatch.setattr(settings, "LLM_BASIC_AUTH_PASSWORD", "mainpass")
+
+    # 1. When RESEARCH_LLM_* is unset, falls back cleanly to LLM_*
+    monkeypatch.setattr(settings, "RESEARCH_LLM_BASE_URL", None)
+    monkeypatch.setattr(settings, "RESEARCH_LLM_MODEL", None)
+    monkeypatch.setattr(settings, "RESEARCH_LLM_BASIC_AUTH_USERNAME", None)
+    monkeypatch.setattr(settings, "RESEARCH_LLM_BASIC_AUTH_PASSWORD", None)
+    assert research_llm_factory.base_url == "http://main-llm:8000/v1"
+    assert research_llm_factory.model_name == "qwen3:14b"
+    assert research_llm_factory.basic_auth_credentials == ("mainuser", "mainpass")
+
+    # 2. When RESEARCH_LLM_* is set, uses separate endpoint/model while falling back Basic Auth if unset
+    monkeypatch.setattr(settings, "RESEARCH_LLM_BASE_URL", "http://planner-llm:8001/v1")
+    monkeypatch.setattr(settings, "RESEARCH_LLM_MODEL", "gemma4-extended")
+    assert research_llm_factory.base_url == "http://planner-llm:8001/v1"
+    assert research_llm_factory.model_name == "gemma4-extended"
+    assert research_llm_factory.basic_auth_credentials == ("mainuser", "mainpass")
+    # Main llm_factory remains unchanged
+    main_factory = LLMFactory()
+    assert main_factory.base_url == "http://main-llm:8000/v1"
+    assert main_factory.model_name == "qwen3:14b"

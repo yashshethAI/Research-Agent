@@ -19,6 +19,10 @@ class SearchNotConfiguredError(Exception):
     """Raised when the search provider is unconfigured or missing credentials."""
 
 
+class SearchEngineRateLimitError(RuntimeError):
+    """Raised when SearXNG upstream engines return CAPTCHA, rate-limit, or suspension errors."""
+
+
 class BaseSearchProvider(abc.ABC):
     """Abstract interface for GST legal search providers."""
 

@@ -12,7 +12,7 @@ CORE RULES:
 """
 
 # Call 1: Compact flat JSON schema + few-shot clarification boundaries for <26B models
-QUERY_UNDERSTANDING_PROMPT = """Analyze this Indian GST query and prior conversation history. Return ONLY a single valid JSON object (no markdown commentary outside JSON).
+QUERY_UNDERSTANDING_PROMPT = """Analyze this Indian GST query and active conversation context. Return ONLY a single valid JSON object (no commentary outside JSON).
 
 Today's Date: {current_date}
 Active Indian Financial Year: {current_fy}
@@ -21,18 +21,21 @@ JSON KEYS (keep flat and exact):
 - "gst_topics": list of 1-3 short GST legal topics (e.g. ["Input Tax Credit", "Section 16(4)"]).
 - "financial_year": relevant FY string (e.g. "FY 2020-21") or "{current_fy}" if current/unspecified.
 - "taxpayer_type": e.g. "Regular Registered Taxable Person", "Composition Dealer", "SEZ Unit", "Exporter".
-- "target_sections": list of exact Section/Rule/Notification/Circular strings relevant to look up.
-- "needs_clarification": boolean. Set true ONLY if a missing material fact completely flips the legal outcome AND is not answered in Conversation History. Otherwise false.
+- "target_sections": ONLY exact Section/Rule/Act strings explicitly mentioned in the query or 100% certain. NEVER invent or guess Notification or Circular numbers (if unsure, return []).
+- "needs_clarification": boolean.
+  * NEVER ask the user what the law, effective date, or statutory amendment says—researching the law is YOUR job.
+  * NEVER set true for general statutory/legal-position questions (e.g. "What is the legal position on Section 16(4)...?") or if Conversation Context already shows a prior clarification prompt.
+  * Set true ONLY when a missing client-specific fact completely flips the statutory outcome (e.g. passenger car vs goods transport truck under Section 17(5)).
 - "clarification_question": concise 1-2 bullet follow-up questions if needs_clarification is true, else "".
-- "missing_facts": list of missing critical facts if needs_clarification is true, else [].
-- "search_queries": 3 to 4 short search keyword phrases (3-8 words each, NO "site:" operators, NO full sentences). Cover: (1) statutory section/rule, (2) CBIC circular/notification, (3) court/GSTAT/AAR ruling or GST portal procedure.
-- "time_range": null unless user explicitly asks ONLY for news/updates published within the past year/month ("year" or "month"). NEVER set "year" for enacted amendments or historical law questions.
+- "missing_facts": list of missing client facts if needs_clarification is true, else [].
+- "search_queries": 3 short search keyword phrases (3-8 words each, NO "site:" operators, NO full sentences). Preserve EVERY core subject entity from the query (e.g. both "Promoters" and "SMEs", or both "motor vehicle repair" and "insurance").
+- "time_range": set "year" ONLY if the user explicitly asks for latest/recent updates or news (e.g. "latest updates in GST..."). Keep null for statutory provisions or historical FY questions.
 
 CLARIFICATION EXAMPLES:
-- Example A: "Can I claim ITC on purchase of a passenger car for office use?" -> needs_clarification: false (standard Section 17(5)(a) conditions can be explained clearly with standard assumptions).
-- Example B: "Is my ITC from FY 2019-20 still valid?" -> needs_clarification: true (only if return filing date before/after 30 Nov 2021 under Section 16(5) or SCN status determines validity), clarification_question: "- Did you file the relevant GSTR-3B for FY 2019-20 on or before 30 November 2021?\n- Has any Show Cause Notice or adjudication order been passed on this ITC?".
+- Example A: "What is the legal position for claiming ITC for FY 2019-20 under Section 16(4) after Section 16(5)?" -> needs_clarification: false (explain the statutory rules and conditions clearly based on official law).
+- Example B: "Can my client claim ITC on motor vehicle repair and insurance expenses?" -> needs_clarification: true (client's vehicle type determines Section 17(5)(a) eligibility), clarification_question: "- What type of vehicle is it (passenger car with seating <=13, or a commercial goods transport vehicle)?\n- Is it used exclusively for taxable business supplies?".
 
-Conversation History:
+Active Conversation Context:
 {context}
 
 Current User Query:
@@ -50,7 +53,7 @@ TEMPORAL REFERENCE BASELINE:
 RESPONSE STYLE & STRUCTURE:
 - Write in plain, easy-to-understand English using clean bullet points (`- ...`) and clear subheadings as needed.
 - Do NOT pad answers or force a fixed number of bullets—use as many or as few bullets as the question genuinely requires.
-- Start with a clear bottom-line conclusion tag: [PERMITTED] / [NOT PERMITTED] / [PERMITTED SUBJECT TO CONDITIONS] / [FURTHER VERIFICATION REQUIRED].
+- Include a bottom-line tag ([PERMITTED] / [NOT PERMITTED] / [PERMITTED SUBJECT TO CONDITIONS] / [FURTHER VERIFICATION REQUIRED]) ONLY for compliance or eligibility questions; omit those tags for general informational update summaries.
 - Keep each bullet focused and practical (covering governing law, dates/retrospective effect, circulars/court position, compliance/GSTR reporting, and risks where relevant).
 
 LEGAL REASONING INVARIANTS:
@@ -60,7 +63,9 @@ LEGAL REASONING INVARIANTS:
 
 CITATION & SOURCE TIER RULES:
 - Treat the Retrieved Evidence below as overriding your training memory.
-- Cite sources inline using the Source ID shorthand `[Section / Circular / Case Name](SRC-001)` (or exact source URL from evidence). Do NOT invent circular numbers, notification numbers, or URLs not present in Retrieved Evidence.
+- NEVER claim "no notifications/updates exist" merely because retrieved sources did not include them—state "not found in the retrieved sources".
+- NEVER apply an effective date from one clause or section onto another provision unless that excerpt explicitly states it.
+- Cite sources inline using `[Section / Circular / Case Name](SRC-001)` or `[SRC-001]`. Do NOT invent circular numbers, notification numbers, or URLs not present in Retrieved Evidence.
 - If evidence includes `verified_secondary` or `unverified_fallback` sources (or `snippet_only` extracts), explicitly mention that primary official text was unavailable or supplemented by secondary/unverified commentary.
 
 Retrieved Evidence:

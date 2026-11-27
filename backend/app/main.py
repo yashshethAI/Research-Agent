@@ -12,7 +12,7 @@ from backend.app.api.conversations import router as conversations_router
 from backend.app.api.research import router as research_router
 from backend.app.core.config import settings
 from backend.app.core.logging_utils import configure_correlated_logging
-from backend.app.llm.factory import llm_factory
+from backend.app.llm.factory import llm_factory, research_llm_factory
 from backend.app.schemas.api import ConfigStatusResponse
 from backend.app.tools.search.searxng_adapter import SearXNGSearchAdapter
 
@@ -57,6 +57,18 @@ async def _check_search_health() -> tuple[bool, str]:
 async def health_check() -> dict:
     """Basic health check endpoint."""
     llm_ok, llm_msg = await llm_factory.health_check() if llm_factory.is_configured() else (False, "LLM Not Configured")
+    if (
+        research_llm_factory.base_url != llm_factory.base_url
+        or research_llm_factory.basic_auth_credentials != llm_factory.basic_auth_credentials
+    ):
+        r_llm_ok, r_llm_msg = (
+            await research_llm_factory.health_check()
+            if research_llm_factory.is_configured()
+            else (False, "Research LLM Not Configured")
+        )
+    else:
+        r_llm_ok, r_llm_msg = llm_ok, f"LLM endpoint reachable. Model: {research_llm_factory.model_name}" if llm_ok else llm_msg
+
     search_ok, search_msg = await _check_search_health()
     return {
         "status": "healthy",
@@ -66,7 +78,14 @@ async def health_check() -> dict:
         "llm_status": {
             "configured": llm_factory.is_configured(),
             "reachable": llm_ok,
+            "model": llm_factory.model_name,
             "message": llm_msg,
+        },
+        "research_llm_status": {
+            "configured": research_llm_factory.is_configured(),
+            "reachable": r_llm_ok,
+            "model": research_llm_factory.model_name,
+            "message": r_llm_msg,
         },
         "search_status": {
             "configured": settings.is_search_configured,
@@ -97,8 +116,10 @@ async def config_status() -> ConfigStatusResponse:
         app_name=settings.APP_NAME,
         app_env=settings.APP_ENV,
         llm_configured=llm_factory.is_configured(),
-        llm_base_url=settings.LLM_BASE_URL,
-        llm_model=settings.LLM_MODEL,
+        llm_base_url=llm_factory.base_url,
+        llm_model=llm_factory.model_name if llm_factory.is_configured() else None,
+        research_llm_base_url=research_llm_factory.base_url,
+        research_llm_model=research_llm_factory.model_name if research_llm_factory.is_configured() else None,
         search_configured=settings.is_search_configured,
         search_provider=settings.SEARCH_PROVIDER,
         search_reachable=search_ok,

@@ -19,7 +19,7 @@ from backend.app.core.logging_utils import (
     set_log_context,
     strip_thinking_tags,
 )
-from backend.app.llm.factory import llm_factory
+from backend.app.llm.factory import llm_factory, research_llm_factory
 from backend.app.storage.conversations import conversation_storage
 from backend.app.tools.evidence_extractor import normalize_llm_search_queries
 
@@ -74,25 +74,62 @@ def _heuristic_fallback(query: str, current_fy: str) -> _QueryPlanSchema:
         f"{' '.join(targets[:2]) or keywords} CBIC circular notification",
         f"{' '.join(targets[:2]) or keywords} High Court Supreme Court GSTAT GST",
     ]
+    time_range = "year" if re.search(r"\b(?:latest|recent|this\s+year|2026)\b", query, re.IGNORECASE) else None
 
     return _QueryPlanSchema(
         gst_topics=targets[:3] or ["GST Statutory Provision"],
         financial_year=fy,
         target_sections=targets,
-        search_queries=normalize_llm_search_queries(queries, max_queries=4),
+        search_queries=normalize_llm_search_queries(queries, max_queries=3),
+        time_range=time_range,
     )
 
 
-def _format_history_context(messages: list[dict[str, Any]], max_turns: int = 6) -> str:
+def _extract_active_exchange(messages: list[dict[str, Any]], current_query: str) -> tuple[str, str, bool]:
+    """Isolates only the active clarification chain (preventing prior unrelated topics from bleeding in).
+
+    Returns (context_text, effective_query, already_clarified).
+    """
     if not messages:
-        return "None (New conversation)"
-    lines: list[str] = []
-    for msg in messages[-max_turns:]:
-        role = (msg.get("role") or "user").upper()
-        content = (msg.get("content") or "").strip().replace("\n", " ")
-        if content:
-            lines.append(f"{role}: {content[:400]}")
-    return "\n".join(lines) if lines else "None"
+        return "None (New conversation)", current_query, False
+
+    last_msg = messages[-1]
+    if last_msg.get("role") == "assistant" and last_msg.get("metadata", {}).get("needs_clarification"):
+        # Walk backwards across the contiguous clarification chain until we hit a non-clarification assistant answer
+        chain: list[dict[str, Any]] = []
+        for msg in reversed(messages):
+            role = msg.get("role")
+            is_clar = bool(msg.get("metadata", {}).get("needs_clarification"))
+            if role == "assistant" and not is_clar:
+                break
+            chain.append(msg)
+        chain.reverse()
+
+        user_parts = [m.get("content", "").strip() for m in chain if m.get("role") == "user" and m.get("content")]
+        root_query = user_parts[0] if user_parts else ""
+        followups = [*user_parts[1:], current_query.strip()]
+        effective_query = (
+            f"{root_query} (Clarification details: {'; '.join(p for p in followups if p)})"
+            if root_query
+            else current_query
+        )
+
+        lines = [
+            f"{(m.get('role') or 'user').upper()}: {(m.get('content') or '').strip().replace(chr(10), ' ')[:400]}"
+            for m in chain[-6:]
+        ]
+        return "\n".join(lines), effective_query, True
+
+    # New independent question: pass only minimal context if the query looks like a short follow-up
+    if len(current_query.split()) <= 7 and len(messages) >= 2:
+        recent = messages[-2:]
+        lines = [
+            f"{(m.get('role') or 'user').upper()}: {(m.get('content') or '').strip().replace(chr(10), ' ')[:250]}"
+            for m in recent
+        ]
+        return "\n".join(lines), current_query, False
+
+    return "None (Treat as independent new GST query)", current_query, False
 
 
 async def understand_query_node(state: ResearchState) -> dict[str, Any]:
@@ -118,7 +155,7 @@ async def understand_query_node(state: ResearchState) -> dict[str, Any]:
                 errors.append(make_node_error("understand_query", "load_history", e, state.conversation_id))
 
         # 2. Short-circuit cleanly if LLM is unconfigured
-        if not llm_factory.is_configured():
+        if not llm_factory.is_configured() or not research_llm_factory.is_configured():
             guidance = (
                 "### ⚖️ GST PRACTICE COPILOT — INFERENCE SETUP REQUIRED\n\n"
                 "The legal research agent is running, but no active OpenAI-compatible LLM endpoint is configured.\n\n"
@@ -137,20 +174,24 @@ async def understand_query_node(state: ResearchState) -> dict[str, Any]:
             }
 
         date_str, current_fy = _current_ist_calendar()
-        history_ctx = _format_history_context(messages)
-        logger.info(f"Entering understand_query (query_len={len(state.query)}, history_msgs={len(messages)})")
+        history_ctx, effective_query, already_clarified = _extract_active_exchange(messages, state.query)
+        logger.info(
+            f"Entering understand_query (query_len={len(state.query)}, history_msgs={len(messages)}, already_clarified={already_clarified})"
+        )
 
-        # 3. Call LLM #1 with compact JSON prompt and bounded max_tokens
+        # 3. Call LLM #1 via research_llm_factory (disabling heavy <think> overhead on qwen3 planners)
         parsed_plan: _QueryPlanSchema | None = None
         prompt = QUERY_UNDERSTANDING_PROMPT.format(
             current_date=date_str,
             current_fy=current_fy,
             context=history_ctx,
-            query=state.query,
+            query=effective_query,
         )
+        if "qwen3" in (research_llm_factory.model_name or "").lower():
+            prompt = f"/no_think\n{prompt}"
 
         try:
-            llm = llm_factory.get_chat_model(max_tokens=700)
+            llm = research_llm_factory.get_chat_model(max_tokens=700)
             resp = await llm.ainvoke([
                 SystemMessage(content="Return valid JSON only. No explanations outside JSON."),
                 HumanMessage(content=prompt),
@@ -168,24 +209,35 @@ async def understand_query_node(state: ResearchState) -> dict[str, Any]:
                 errors.append(make_node_error("understand_query", "json_parse", parse_err))
         except Exception as llm_err:
             logger.error(f"LLM Call #1 transport/inference error: {llm_err}", exc_info=True)
-            errors.append(make_node_error("understand_query", "llm_call", llm_err, llm_factory.base_url or ""))
+            errors.append(make_node_error("understand_query", "llm_call", llm_err, research_llm_factory.base_url or ""))
 
         if parsed_plan is None:
-            parsed_plan = _heuristic_fallback(state.query, current_fy)
+            parsed_plan = _heuristic_fallback(effective_query, current_fy)
 
-        # Normalize queries deterministically (strip site: tokens, PII, filler words)
-        clean_queries = normalize_llm_search_queries(parsed_plan.search_queries, max_queries=4)
+        # Enforce one-shot clarification guard: never trap the user in repeated clarification loops
+        needs_clarification = bool(parsed_plan.needs_clarification) and not already_clarified
+        clarification_prompt = parsed_plan.clarification_question if needs_clarification else ""
+        missing_facts = parsed_plan.missing_facts if needs_clarification else []
+
+        # Strip hallucinated Notification/Circular numbers from target_sections if absent from query
+        query_lower = effective_query.lower()
+        filtered_targets: list[str] = []
+        for t in parsed_plan.target_sections:
+            t_clean = t.strip()
+            if not t_clean:
+                continue
+            if ("notification" in t_clean.lower() or "circular" in t_clean.lower()) and not any(
+                num in query_lower for num in re.findall(r"\d+/\d{4}", t_clean)
+            ):
+                continue
+            filtered_targets.append(t_clean)
+
+        # Normalize queries deterministically (cap at 3 to prevent SearXNG upstream bursts)
+        clean_queries = normalize_llm_search_queries(parsed_plan.search_queries, max_queries=3)
         if not clean_queries:
-            clean_queries = _heuristic_fallback(state.query, current_fy).search_queries
+            clean_queries = _heuristic_fallback(effective_query, current_fy).search_queries[:3]
 
         time_range = parsed_plan.time_range if parsed_plan.time_range in ("day", "week", "month", "year") else None
-
-        # Combine prior user query if this turn answered a clarification follow-up
-        effective_query = state.query
-        if messages and len(messages) >= 2 and messages[-1].get("metadata", {}).get("needs_clarification"):
-            prev_user = next((m.get("content", "") for m in reversed(messages[:-1]) if m.get("role") == "user"), "")
-            if prev_user:
-                effective_query = f"{prev_user} | Follow-up details: {state.query}"
 
         extracted_facts = {
             "gst_topics": parsed_plan.gst_topics or ["General GST Law"],
@@ -199,15 +251,15 @@ async def understand_query_node(state: ResearchState) -> dict[str, Any]:
         ]
         research_plan = {
             "target_acts": ["CGST Act, 2017", "IGST Act, 2017"],
-            "target_sections": parsed_plan.target_sections,
-            "target_rules": [s for s in parsed_plan.target_sections if "rule" in s.lower()],
+            "target_sections": filtered_targets,
+            "target_rules": [s for s in filtered_targets if "rule" in s.lower()],
             "search_intent_queries": clean_queries,
         }
 
         dur = int((time.perf_counter() - t0) * 1000)
         summary = {
             "topics": extracted_facts["gst_topics"],
-            "needs_clarification": parsed_plan.needs_clarification,
+            "needs_clarification": needs_clarification,
             "queries_count": len(clean_queries),
             "time_range": time_range,
         }
@@ -219,9 +271,9 @@ async def understand_query_node(state: ResearchState) -> dict[str, Any]:
             "messages": messages,
             "extracted_facts": extracted_facts,
             "assumptions": assumptions,
-            "missing_facts": parsed_plan.missing_facts,
-            "needs_clarification": parsed_plan.needs_clarification,
-            "clarification_prompt": parsed_plan.clarification_question or None,
+            "missing_facts": missing_facts,
+            "needs_clarification": needs_clarification,
+            "clarification_prompt": clarification_prompt or None,
             "research_plan": research_plan,
             "search_queries": clean_queries,
             "search_time_range": time_range,

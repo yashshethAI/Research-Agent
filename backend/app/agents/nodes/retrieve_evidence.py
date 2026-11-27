@@ -23,7 +23,11 @@ from backend.app.tools.evidence_extractor import (
 from backend.app.tools.fetcher import safe_fetcher
 from backend.app.tools.html_parser import HTMLParser
 from backend.app.tools.pdf_parser import PDFParser
-from backend.app.tools.search.base import SearchNotConfiguredError, SearchResult
+from backend.app.tools.search.base import (
+    SearchEngineRateLimitError,
+    SearchNotConfiguredError,
+    SearchResult,
+)
 from backend.app.tools.search.mock_adapter import MockSearchAdapter
 from backend.app.tools.search.searxng_adapter import SearXNGSearchAdapter
 from backend.app.tools.source_validator import source_validator
@@ -65,7 +69,7 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
         if state.llm_unconfigured_guidance or state.needs_clarification:
             return {"current_step": "retrieve_evidence"}
 
-        queries = normalize_llm_search_queries(state.search_queries, max_queries=4)
+        queries = normalize_llm_search_queries(state.search_queries, max_queries=3)
         if not queries:
             queries = normalize_llm_search_queries([state.query], max_queries=2)
 
@@ -104,8 +108,11 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
         # 2. Search across queries in active tier
         raw_hits: list[SearchResult] = []
         seen_urls: set[str] = {r.get("url", "") for r in state.search_results}
+        rate_limited = False
 
-        for q in queries:
+        for idx, q in enumerate(queries):
+            if idx > 0 and settings.SEARCH_PROVIDER == "searxng":
+                await asyncio.sleep(0.25)
             try:
                 results = await adapter.search(
                     query=q,
@@ -134,6 +141,11 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
                     "execution_trace": trace,
                     "node_errors": errors,
                 }
+            except SearchEngineRateLimitError as e:
+                logger.warning(f"Search engine rate limit for '{q}': {e}")
+                errors.append(make_node_error("retrieve_evidence", "search", e, q))
+                rate_limited = True
+                break
             except Exception as e:
                 logger.error(f"Search failed for query '{q}': {e}")
                 errors.append(make_node_error("retrieve_evidence", "search", e, q))
@@ -231,6 +243,7 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
             research_plan=state.research_plan,
             tier=active_tier,
             start_index=len(state.evidence_records) + 1,
+            max_excerpt_chars=2200,
         )
         merged_evidence = [*state.evidence_records, *new_evidence]
 
@@ -244,6 +257,7 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
         next_tier = _next_search_tier(active_tier)
         should_escalate = (
             not sufficient
+            and not rate_limited
             and next_tier is not None
             and state.retry_count < settings.MAX_RESEARCH_RETRIES
         )

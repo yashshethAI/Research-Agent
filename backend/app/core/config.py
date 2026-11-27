@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     APP_PORT: int = 8000
     STREAMLIT_PORT: int = 8501
 
-    # OpenAI-Compatible Local/Cloud LLM
+    # OpenAI-Compatible Local/Cloud LLM (Answer Generation)
     LLM_PROVIDER: str = "openai_compatible"
     LLM_BASE_URL: str | None = None
     LLM_API_KEY: str | None = None
@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.0
     LLM_TIMEOUT: int = 180
     LLM_MAX_RETRIES: int = 2
+
+    # Optional Separate OpenAI-Compatible LLM for Query Understanding (falls back to LLM_* if unset)
+    RESEARCH_LLM_BASE_URL: str | None = None
+    RESEARCH_LLM_API_KEY: str | None = None
+    RESEARCH_LLM_BASIC_AUTH_USERNAME: str | None = None
+    RESEARCH_LLM_BASIC_AUTH_PASSWORD: str | None = None
+    RESEARCH_LLM_MODEL: str | None = None
+    RESEARCH_LLM_TEMPERATURE: float | None = None
+    RESEARCH_LLM_TIMEOUT: int | None = None
+    RESEARCH_LLM_MAX_RETRIES: int | None = None
 
     # Web Search (Local-First SearXNG)
     SEARCH_PROVIDER: str = "searxng"
