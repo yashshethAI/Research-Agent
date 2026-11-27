@@ -36,8 +36,8 @@ logger = logging.getLogger(__name__)
 
 # Natural-language tier hints appended when site: operators are disabled
 _TIER_HINTS: dict[str, str] = {
-    "official": "CBIC GST gov.in",
-    "verified_secondary": "ICAI Taxmann Taxsutra",
+    "official": "CBIC",
+    "verified_secondary": "Taxmann ICAI",
 }
 
 
@@ -59,11 +59,16 @@ def _broaden_queries(queries: list[str]) -> list[str]:
 
 
 def _add_tier_hint(query: str, tier: str) -> str:
-    """Appends a natural-language tier hint when site: operators are disabled."""
+    """Appends a light tier hint when site: operators are disabled and query lacks domain cues."""
     if settings.SEARXNG_USE_SITE_OPERATORS:
         return query
+    q_l = query.lower()
+    if tier == "official":
+        if "cbic" in q_l or "gst" in q_l or "cgst" in q_l or "igst" in q_l:
+            return query
+        return f"{query} CBIC"
     hint = _TIER_HINTS.get(tier)
-    if hint and hint.lower() not in query.lower():
+    if hint and hint.lower() not in q_l:
         return f"{query} {hint}"
     return query
 
@@ -163,7 +168,7 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
         # 3. Search across queries in active tier
         raw_hits: list[SearchResult] = list(pool_hits)
         rate_limited = False
-        early_stop_threshold = 10
+        early_stop_threshold = 5
 
         for idx, q in enumerate(queries):
             # Early stop: if we already have enough unfiltered hits, skip remaining queries
@@ -238,6 +243,7 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
 
         # 6. Parse HTML / PDF in memory (never storing raw bytes in ResearchState)
         parsed_docs: list[dict[str, Any]] = []
+        spa_pending: list[tuple[SearchResult, Any, dict[str, Any]]] = []
         fetch_counts = {"fetched": 0, "spa_shell": 0, "snippet_only": 0, "playwright_rendered": 0}
 
         for hit, outcome in zip(candidates, fetch_outcomes):
@@ -269,37 +275,7 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
                     is_spa = detect_spa_shell(html_str, extracted.get("text") or "")
 
                 if is_spa:
-                    # Try Playwright rendering for Tier 1/2 SPA shells
-                    rendered_doc = await safe_fetcher.fetch_rendered_html(outcome.url)
-                    if rendered_doc is not None:
-                        rendered_html = rendered_doc.content.decode("utf-8", errors="replace")
-                        rendered_extracted = HTMLParser.parse_html(rendered_html, base_url=outcome.url)
-                        rendered_text = rendered_extracted.get("text") or ""
-                        if len(rendered_text.strip()) > 250:
-                            fetch_counts["playwright_rendered"] += 1
-                            parsed_docs.append({
-                                "url": outcome.url,
-                                "title": rendered_extracted.get("title") or hit.title or outcome.url,
-                                "text": rendered_text[:150000],
-                                "doc_type": "JS-SPA Rendered (Playwright)",
-                                "source_tier": active_tier,
-                                "fetch_status": "fetched",
-                                "sha256_hash": rendered_doc.sha256_hash,
-                            })
-                            continue
-
-                    # Playwright unavailable or rendered content still empty -> snippet fallback
-                    fetch_counts["spa_shell"] += 1
-                    fallback_text = hit.snippet or (extracted.get("text") or "")
-                    parsed_docs.append({
-                        "url": outcome.url,
-                        "title": extracted.get("title") or hit.title or outcome.url,
-                        "text": fallback_text,
-                        "doc_type": "JS-SPA Shell (Snippet Only)",
-                        "source_tier": active_tier,
-                        "fetch_status": "spa_shell",
-                        "sha256_hash": outcome.sha256_hash,
-                    })
+                    spa_pending.append((hit, outcome, extracted))
                 else:
                     fetch_counts["fetched"] += 1
                     parsed_docs.append({
@@ -326,6 +302,43 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
                         "sha256_hash": outcome.sha256_hash,
                     })
 
+        # 6b. Batch-render up to 2 SPA shells concurrently in a single Chromium session
+        if spa_pending:
+            rendered_docs = await safe_fetcher.fetch_rendered_html_batch(
+                [outcome.url for _, outcome, _ in spa_pending],
+                max_urls=2,
+            )
+            for hit, outcome, extracted in spa_pending:
+                rendered_doc = rendered_docs.get(outcome.url)
+                if rendered_doc is not None:
+                    rendered_html = rendered_doc.content.decode("utf-8", errors="replace")
+                    rendered_extracted = HTMLParser.parse_html(rendered_html, base_url=outcome.url)
+                    rendered_text = rendered_extracted.get("text") or ""
+                    if len(rendered_text.strip()) > 250:
+                        fetch_counts["playwright_rendered"] += 1
+                        parsed_docs.append({
+                            "url": outcome.url,
+                            "title": rendered_extracted.get("title") or hit.title or outcome.url,
+                            "text": rendered_text[:150000],
+                            "doc_type": "JS-SPA Rendered (Playwright)",
+                            "source_tier": active_tier,
+                            "fetch_status": "fetched",
+                            "sha256_hash": rendered_doc.sha256_hash,
+                        })
+                        continue
+
+                fetch_counts["spa_shell"] += 1
+                fallback_text = hit.snippet or (extracted.get("text") or "")
+                parsed_docs.append({
+                    "url": outcome.url,
+                    "title": extracted.get("title") or hit.title or outcome.url,
+                    "text": fallback_text,
+                    "doc_type": "JS-SPA Shell (Snippet Only)",
+                    "source_tier": active_tier,
+                    "fetch_status": "spa_shell",
+                    "sha256_hash": outcome.sha256_hash,
+                })
+
         # 7. Compile query-relevant passages & merge with any prior tier records
         new_evidence = compile_relevant_evidence(
             parsed_docs,
@@ -345,11 +358,19 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
         )
 
         next_tier = _next_search_tier(active_tier)
+        fetched_after = {e.get("url", "") for e in merged_evidence if e.get("url")}
+        has_pool_for_next = bool(
+            next_tier
+            and any(
+                r.get("source_tier") == next_tier and r.get("url") not in fetched_after
+                for r in all_search_results
+            )
+        )
         should_escalate = (
             not sufficient
-            and not rate_limited
             and next_tier is not None
             and state.retry_count < settings.MAX_RESEARCH_RETRIES
+            and (not rate_limited or has_pool_for_next)
         )
 
         next_retry = state.retry_count + 1 if should_escalate else state.retry_count

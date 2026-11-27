@@ -475,3 +475,51 @@ async def test_retrieve_evidence_reuses_pool_on_tier_escalation(monkeypatch):
     out = await retrieve_evidence_node(state)
     assert len(out["evidence_records"]) >= 1
     assert any("taxmann.com" in r["url"] for r in out["evidence_records"])
+
+
+@pytest.mark.asyncio
+async def test_retrieve_evidence_early_stops_at_5_hits_and_cleans_tier_hints(monkeypatch):
+    """Verify retrieve_evidence skips query 1 once query 0 yields >=5 hits and avoids noisy gov.in suffix."""
+    monkeypatch.setattr(settings, "SEARCH_PROVIDER", "searxng")
+    monkeypatch.setattr(settings, "SEARXNG_BASE_URL", "http://localhost:8080")
+    monkeypatch.setattr(settings, "SEARXNG_USE_SITE_OPERATORS", False)
+    search_queries_sent: list[str] = []
+
+    async def mock_search(self, query, domains=None, max_results=10, time_range=None):
+        search_queries_sent.append(query)
+        return [
+            SearchResult(
+                title=f"GST Doc {i}",
+                url=f"https://www.cbic.gov.in/doc-{i}.pdf",
+                snippet="GST effective date 1 July 2017",
+                domain="www.cbic.gov.in",
+                score=float(10 - i),
+            )
+            for i in range(5)
+        ]
+
+    async def mock_fetch(url: str, allow_unverified: bool = False):
+        return FetchedDocument(
+            url=url,
+            content=b"<html><body><h1>GST Introduction</h1><p>Goods and Services Tax was implemented in India on 1 July 2017 under the Constitution 101st Amendment Act.</p></body></html>",
+            content_type="text/html",
+            status_code=200,
+            sha256_hash="earlystophash",
+            file_path="",
+        )
+
+    monkeypatch.setattr(SearXNGSearchAdapter, "search", mock_search)
+    monkeypatch.setattr(source_validator, "validate_url", lambda url, allow_unverified=False: (True, "ok"))
+    monkeypatch.setattr(safe_fetcher, "fetch", mock_fetch)
+
+    state = ResearchState(
+        query="when was GST introduced in India",
+        search_queries=["when was GST introduced in India", "GST rollout date 1 July 2017"],
+        search_tier="official",
+    )
+    out = await retrieve_evidence_node(state)
+
+    assert len(search_queries_sent) == 1
+    assert search_queries_sent[0] == "when was GST introduced in India"
+    assert "gov.in" not in search_queries_sent[0]
+    assert len(out["evidence_records"]) == 5

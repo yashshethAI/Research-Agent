@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import sys
 from urllib.parse import urlparse
 
 import httpx
@@ -144,44 +146,98 @@ class SafeFetcher:
 
             raise SourceSecurityError("Exceeded maximum redirects (5) during fetch.")
 
-    async def fetch_rendered_html(self, url: str) -> FetchedDocument | None:
-        """Renders a JS-heavy SPA page using headless Playwright Chromium.
-
-        Strictly limited to Tier 1/2 allowlisted domains with anti-SSRF checks.
-        Returns None if Playwright is unavailable or the domain is not allowlisted.
-        """
-        if not _HAS_PLAYWRIGHT:
-            logger.warning("Playwright not installed; cannot render SPA page.")
-            return None
-
-        # Anti-SSRF: only render Tier 1/2 allowlisted domains
+    def _is_playwright_allowed(self, url: str) -> bool:
+        """Validates Tier 1/2 domain allowlist and anti-SSRF rules prior to browser navigation."""
         hostname = (urlparse(url).hostname or "").lower()
         if not any(hostname == d or hostname.endswith("." + d) for d in _PLAYWRIGHT_ALLOWED_DOMAINS):
             logger.warning(f"Playwright render denied for non-allowlisted domain: {hostname}")
-            return None
-
-        # Additional SSRF check via source_validator
+            return False
         try:
             source_validator.assert_valid_url(url, allow_unverified=False)
+            return True
         except Exception:
             logger.warning(f"Playwright SSRF check failed for {url}")
-            return None
+            return False
 
-        try:
+    async def _render_urls_with_playwright(self, urls: list[str]) -> dict[str, str]:
+        """Renders up to len(urls) pages concurrently inside one headless Chromium browser.
+
+        Runs on an isolated ProactorEventLoop inside a worker thread on Windows so
+        Playwright's subprocess transport works even when Uvicorn uses SelectorEventLoop.
+        """
+
+        async def _render_page(browser, url: str) -> tuple[str, str | None]:
+            page = await browser.new_page()
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=15000)
+                try:
+                    await page.wait_for_selector("p, table, h1, h2", timeout=5000)
+                except Exception:
+                    await page.wait_for_timeout(2000)
+                return url, await page.content()
+            except Exception as e:
+                logger.error(f"Playwright rendering failed for {url}: {e}")
+                return url, None
+            finally:
+                await page.close()
+
+        async def _run_batch() -> dict[str, str]:
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True)
                 try:
-                    page = await browser.new_page()
-                    await page.goto(url, wait_until="networkidle", timeout=15000)
-                    rendered_html = await page.content()
+                    pairs = await asyncio.gather(*[_render_page(browser, u) for u in urls])
+                    return {u: html for u, html in pairs if html}
                 finally:
                     await browser.close()
 
+        def _thread_entry() -> dict[str, str]:
+            if sys.platform == "win32":
+                loop = asyncio.ProactorEventLoop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(_run_batch())
+                finally:
+                    loop.close()
+            return asyncio.run(_run_batch())
+
+        return await asyncio.to_thread(_thread_entry)
+
+    async def fetch_rendered_html_batch(
+        self, urls: list[str], max_urls: int = 2
+    ) -> dict[str, FetchedDocument]:
+        """Renders up to max_urls JS-heavy Tier 1/2 SPA pages in a single Chromium session."""
+        if not urls:
+            return {}
+
+        # Preserve instance-level monkeypatches on fetch_rendered_html in tests
+        if "fetch_rendered_html" in self.__dict__:
+            out: dict[str, FetchedDocument] = {}
+            for u in urls[:max_urls]:
+                doc = await self.fetch_rendered_html(u)
+                if doc is not None:
+                    out[u] = doc
+            return out
+
+        if not _HAS_PLAYWRIGHT:
+            logger.warning("Playwright not installed; cannot render SPA pages.")
+            return {}
+
+        eligible = [u for u in dict.fromkeys(urls) if self._is_playwright_allowed(u)][:max_urls]
+        if not eligible:
+            return {}
+
+        try:
+            rendered_map = await self._render_urls_with_playwright(eligible)
+        except Exception as e:
+            logger.error(f"Playwright batch rendering failed: {e}")
+            return {}
+
+        docs: dict[str, FetchedDocument] = {}
+        for url, rendered_html in rendered_map.items():
             content_bytes = rendered_html.encode("utf-8")
             if len(content_bytes) > self.max_size_bytes:
                 logger.warning(f"Playwright rendered content too large for {url}")
-                return None
-
+                continue
             domain = urlparse(url).hostname or "unknown"
             doc_hash, path = source_cache_storage.save_document(
                 url=url,
@@ -190,8 +246,7 @@ class SafeFetcher:
                 extension="html",
                 metadata={"content_type": "text/html", "fetch_method": "playwright"},
             )
-
-            return FetchedDocument(
+            docs[url] = FetchedDocument(
                 url=url,
                 content=content_bytes,
                 content_type="text/html",
@@ -199,9 +254,16 @@ class SafeFetcher:
                 sha256_hash=doc_hash,
                 file_path=str(path),
             )
-        except Exception as e:
-            logger.error(f"Playwright rendering failed for {url}: {e}")
-            return None
+        return docs
+
+    async def fetch_rendered_html(self, url: str) -> FetchedDocument | None:
+        """Renders a JS-heavy SPA page using headless Playwright Chromium.
+
+        Strictly limited to Tier 1/2 allowlisted domains with anti-SSRF checks.
+        Returns None if Playwright is unavailable or the domain is not allowlisted.
+        """
+        rendered = await self.fetch_rendered_html_batch([url], max_urls=1)
+        return rendered.get(url)
 
 
 # Global instance

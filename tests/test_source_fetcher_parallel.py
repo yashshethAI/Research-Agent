@@ -169,3 +169,74 @@ async def test_spa_shell_triggers_playwright_fallback_for_tier1(monkeypatch):
     assert rec["fetch_status"] == "fetched"
     assert rec["verified"] is True
     assert "GSTR-9C" in rec["excerpt"]
+
+
+@pytest.mark.asyncio
+async def test_playwright_batch_isolates_loop_and_caps_urls(monkeypatch):
+    """Verify fetch_rendered_html_batch enforces allowlist, caps at max_urls=2, and uses isolated Proactor loop."""
+    import asyncio
+    import sys
+
+    import backend.app.tools.fetcher as fetcher_mod
+
+    visited_urls: list[str] = []
+
+    class _FakePage:
+        def __init__(self):
+            self.url = ""
+
+        async def goto(self, url, wait_until=None, timeout=None):
+            self.url = url
+            visited_urls.append(url)
+
+        async def wait_for_selector(self, selector, timeout=None):
+            return None
+
+        async def wait_for_timeout(self, ms):
+            return None
+
+        async def content(self):
+            return f"<html><body><h1>Rendered {self.url}</h1><p>" + ("GST statutory text " * 25) + "</p></body></html>"
+
+        async def close(self):
+            return None
+
+    class _FakeBrowser:
+        async def new_page(self):
+            return _FakePage()
+
+        async def close(self):
+            return None
+
+    class _FakeChromium:
+        async def launch(self, headless=True):
+            if sys.platform == "win32":
+                assert isinstance(asyncio.get_running_loop(), asyncio.ProactorEventLoop)
+            return _FakeBrowser()
+
+    class _FakePlaywrightCtx:
+        async def __aenter__(self):
+            return type("PW", (), {"chromium": _FakeChromium()})()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(fetcher_mod, "_HAS_PLAYWRIGHT", True)
+    monkeypatch.setattr(fetcher_mod, "async_playwright", lambda: _FakePlaywrightCtx(), raising=False)
+    monkeypatch.setattr(source_validator, "assert_valid_url", lambda url, allow_unverified=False: None)
+
+    fetcher = fetcher_mod.SafeFetcher()
+    urls = [
+        "https://evil-unverified.example.com/bad",
+        "https://taxinformation.cbic.gov.in/spa-1",
+        "https://www.gst.gov.in/spa-2",
+        "https://www.cbic.gov.in/spa-3",
+    ]
+    docs = await fetcher.fetch_rendered_html_batch(urls, max_urls=2)
+
+    assert "https://evil-unverified.example.com/bad" not in docs
+    assert len(visited_urls) == 2
+    assert set(docs.keys()) == {
+        "https://taxinformation.cbic.gov.in/spa-1",
+        "https://www.gst.gov.in/spa-2",
+    }
