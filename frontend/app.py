@@ -56,8 +56,6 @@ if "conversation_id" not in st.session_state:
     st.session_state.conversation_id = str(uuid.uuid4())
 if "messages" not in st.session_state:
     st.session_state.messages = []
-if "uploaded_attachment_ids" not in st.session_state:
-    st.session_state.uploaded_attachment_ids = []
 
 
 def refresh_backend_data():
@@ -73,7 +71,6 @@ if "config_status" not in st.session_state or "conversations" not in st.session_
 def handle_new_chat():
     st.session_state.conversation_id = str(uuid.uuid4())
     st.session_state.messages = []
-    st.session_state.uploaded_attachment_ids = []
     refresh_backend_data()
     st.rerun()
 
@@ -82,7 +79,6 @@ def handle_select_conv(conv_id: str):
     st.session_state.conversation_id = conv_id
     msgs = api_client.get_conversation(conv_id)
     st.session_state.messages = msgs
-    st.session_state.uploaded_attachment_ids = []
     refresh_backend_data()
     st.rerun()
 
@@ -131,29 +127,13 @@ if health.get("status") == "unreachable":
         icon="🚨",
     )
 
-# Optional Document / Notice Upload
-with st.expander("📎 Attach GST Notice, Return Copy or Agreement (PDF / TXT)", expanded=False):
-    uploaded_file = st.file_uploader(
-        "Upload client document for fact extraction (Max 20MB)",
-        type=["pdf", "txt", "html"],
-        key="file_uploader",
-    )
-    if uploaded_file is not None and st.button("Process & Attach Document"):
-        with st.spinner("Uploading and analyzing document..."):
-            try:
-                res = api_client.upload_document(uploaded_file.name, uploaded_file.getvalue())
-                st.session_state.uploaded_attachment_ids.append(res.get("file_id"))
-                st.success(f"Attached `{uploaded_file.name}` (SHA: `{res.get('sha256_hash')[:8]}`)", icon="✅")
-            except Exception as e:
-                st.error(f"Upload failed: {e}")
-
 st.divider()
 
 # Welcome screen when conversation is empty
 if not st.session_state.messages:
     st.info(
         "👋 **Welcome to GST Practice Copilot**.\n\n"
-        "Ask any complex Indian GST query to produce an in-depth **Legal Advisory Explanation with Verified Source Links**.\n\n"
+        "Ask any complex Indian GST query to produce an easy-to-read **Bulleted Legal Advisory with Verified Source Links**.\n\n"
         "**Example Legal Queries to Try:**\n"
         "- *What is the legal position on availing ITC after the due date under Section 16(4) following Finance (No. 2) Act, 2024?*\n"
         "- *Is GST applicable on remuneration paid to executive directors under reverse charge mechanism (RCM)?*\n"
@@ -170,12 +150,10 @@ for idx, msg in enumerate(st.session_state.messages):
     with st.chat_message(role):
         st.markdown(content)
 
-        # Render Evidence Panel if available in metadata or message
         evidence = metadata.get("evidence", [])
         if evidence:
             render_evidence_panel(evidence)
 
-        # Download button for assistant responses
         if role == "assistant" and content and not content.startswith("Error"):
             st.download_button(
                 label="📥 Download Legal Advisory (.md)",
@@ -189,7 +167,6 @@ for idx, msg in enumerate(st.session_state.messages):
 user_prompt = st.chat_input("Enter your GST query, dispute, or compliance issue...")
 
 if user_prompt:
-    # 1. Display user query immediately
     with st.chat_message("user"):
         st.markdown(user_prompt)
 
@@ -199,10 +176,10 @@ if user_prompt:
         "metadata": {"user_role": active_role},
     })
 
-    # 2. Execute research through backend with real-time SSE streaming
+    # Execute research through backend with real-time SSE streaming
     with st.chat_message("assistant"):
         with st.status("🔍 Initializing GST Legal Research Engine...", expanded=True) as status_box:
-            completed_nodes: set[str] = set()
+            seen_steps: set[str] = set()
             answer_text = ""
             evidence_list: list[dict] = []
             research_id = None
@@ -213,7 +190,6 @@ if user_prompt:
                     query=user_prompt,
                     conversation_id=st.session_state.conversation_id,
                     user_role=active_role,
-                    attachment_ids=st.session_state.uploaded_attachment_ids,
                 ):
                     event_type = event_data.get("event")
 
@@ -222,38 +198,42 @@ if user_prompt:
 
                     elif event_type == "step":
                         node = event_data.get("node", "")
+                        tier = event_data.get("tier") or ""
                         label = event_data.get("label", node)
-                        if node not in completed_nodes:
-                            completed_nodes.add(node)
-                            # Render milestone updates with clear badges
-                            if node in ("query_understanding", "fact_extraction"):
+                        step_key = f"{node}:{tier}"
+                        if step_key not in seen_steps:
+                            seen_steps.add(step_key)
+                            if node == "understand_query":
                                 st.write(f"📋 **Stage 1/5:** {label}")
                                 status_box.update(label=f"🔍 Stage 1/5: {label}...")
-                            elif node in ("research_planner", "search_query_generation", "official_source_search"):
-                                st.write(f"📑 **Stage 2/5:** {label}")
+                            elif node == "retrieve_evidence":
+                                st.write(f"🌐 **Stage 2/5:** {label}")
                                 status_box.update(label=f"🌐 Stage 2/5: {label}...")
-                            elif node in ("source_fetcher", "document_extractor", "evidence_compiler"):
-                                st.write(f"📥 **Stage 3/5:** {label}")
-                                status_box.update(label=f"📜 Stage 3/5: {label}...")
-                            elif node in ("legal_analysis", "citation_validator"):
+                            elif node == "synthesize_answer":
+                                st.write(f"✍️ **Stage 3/5:** {label}")
+                                status_box.update(label=f"✍️ Stage 3/5: {label}...")
+                            elif node == "validate_citations":
                                 st.write(f"⚖️ **Stage 4/5:** {label}")
                                 status_box.update(label=f"⚖️ Stage 4/5: {label}...")
-                            elif node in ("answer_generator", "persistence_node"):
-                                st.write(f"✍️ **Stage 5/5:** {label}")
-                                status_box.update(label=f"✍️ Stage 5/5: {label}...")
+                            elif node == "save_session":
+                                st.write(f"💾 **Stage 5/5:** {label}")
+                                status_box.update(label=f"💾 Stage 5/5: {label}...")
 
                     elif event_type == "complete":
                         answer_text = event_data.get("answer", "")
                         evidence_list = event_data.get("evidence", [])
                         research_id = event_data.get("research_id")
                         needs_clarification = event_data.get("needs_clarification", False)
-                        status_box.update(label="✅ Legal Research Explanation Completed", state="complete", expanded=False)
+                        status_label = (
+                            "❓ Clarification Requested" if needs_clarification
+                            else "✅ Legal Research Explanation Completed"
+                        )
+                        status_box.update(label=status_label, state="complete", expanded=False)
 
                     elif event_type == "error":
                         raise RuntimeError(event_data.get("detail", "Unknown error during streaming"))
 
                 if not answer_text:
-                    # Fallback if streaming ended without answer
                     resp = api_client.get_conversation(st.session_state.conversation_id)
                     if resp and resp[-1].get("role") == "assistant":
                         answer_text = resp[-1].get("content", "")
@@ -263,7 +243,6 @@ if user_prompt:
                 if evidence_list:
                     render_evidence_panel(evidence_list)
 
-                # Append assistant message to session state
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": answer_text,
@@ -274,16 +253,16 @@ if user_prompt:
                     },
                 })
 
-                # Refresh sidebar conversations
                 refresh_backend_data()
 
-                st.download_button(
-                    label="📥 Download Legal Advisory (.md)",
-                    data=answer_text,
-                    file_name=f"GST_Advisory_Explanation_{st.session_state.conversation_id[:8]}.md",
-                    mime="text/markdown",
-                    key="dl_latest",
-                )
+                if answer_text and not needs_clarification:
+                    st.download_button(
+                        label="📥 Download Legal Advisory (.md)",
+                        data=answer_text,
+                        file_name=f"GST_Advisory_Explanation_{st.session_state.conversation_id[:8]}.md",
+                        mime="text/markdown",
+                        key="dl_latest",
+                    )
 
             except Exception as e:
                 status_box.update(label="❌ Research Failed", state="error", expanded=True)

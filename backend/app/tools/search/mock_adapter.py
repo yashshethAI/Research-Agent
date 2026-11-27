@@ -8,7 +8,7 @@ from backend.app.tools.search.base import (
 
 
 class MockSearchAdapter(BaseSearchProvider):
-    """Deterministic mock search adapter providing authentic GST legal samples for testing."""
+    """Deterministic tier-aware mock search adapter for offline testing."""
 
     SAMPLE_DATA = [
         {
@@ -19,7 +19,7 @@ class MockSearchAdapter(BaseSearchProvider):
             "domain": "taxinformation.cbic.gov.in",
         },
         {
-            "query_keywords": ["circular 211", "itc", "amendment", "special procedure"],
+            "query_keywords": ["circular 211", "itc", "amendment", "special procedure", "16(5)"],
             "title": "Circular No. 211/5/2024-GST - Clarification on time limit under Section 16(4)",
             "url": "https://www.cbic.gov.in/resources//htdocs-cbec/gst/circular-211-05-2024-gst.pdf",
             "snippet": "Circular clarifies the application of newly inserted Section 16(5) and 16(6) of the CGST Act, 2017 retrospectively extending the time limit to avail ITC for financial years 2017-18, 2018-19, 2019-20, and 2020-21 up to 30th November 2021.",
@@ -40,13 +40,34 @@ class MockSearchAdapter(BaseSearchProvider):
             "domain": "taxinformation.cbic.gov.in",
         },
         {
-            "query_keywords": ["place of supply", "igst", "section 10", "section 12"],
-            "title": "IGST Act, 2017 - Sections 10 and 12 - Determination of Place of Supply",
+            "query_keywords": ["place of supply", "igst", "section 10", "section 12", "section 13"],
+            "title": "IGST Act, 2017 - Sections 10, 12 and 13 - Determination of Place of Supply",
             "url": "https://taxinformation.cbic.gov.in/content-page/guidelines/igst-act-sec-10",
-            "snippet": "Provisions governing place of supply of goods other than supply of goods imported into or exported from India, and place of supply of services where location of supplier and recipient is in India.",
+            "snippet": "Provisions governing place of supply of goods and cross-border services under Sections 10, 12, and 13 of the IGST Act, 2017.",
             "domain": "taxinformation.cbic.gov.in",
         },
+        {
+            "query_keywords": ["corporate guarantee", "valuation", "taxmann", "rule 28", "secondary"],
+            "title": "Taxmann Analysis: Valuation of Corporate Guarantee under Rule 28(2) CGST Rules",
+            "url": "https://www.taxmann.com/post/blog/corporate-guarantee-gst-rule-28-2",
+            "snippet": "Detailed commentary on GST valuation of corporate guarantees between related persons under Rule 28(2) and CBIC clarifications.",
+            "domain": "www.taxmann.com",
+        },
+        {
+            "query_keywords": ["livelaw", "writ", "high court", "itc", "16(4)"],
+            "title": "LiveLaw: High Court Upholds Retrospective Relief under Section 16(5) CGST Act",
+            "url": "https://www.livelaw.in/tax-cases/gst-section-16-5-retrospective-relief",
+            "snippet": "High Court ruling examining constitutional validity and retrospective operation of Section 16(5) of the CGST Act.",
+            "domain": "www.livelaw.in",
+        },
     ]
+
+    @staticmethod
+    def _domain_allowed(domain: str, domains: list[str] | None) -> bool:
+        if not domains:
+            return True
+        d = domain.lower()
+        return any(d == allowed.lower() or d.endswith("." + allowed.lower()) for allowed in domains)
 
     async def search(
         self,
@@ -59,6 +80,8 @@ class MockSearchAdapter(BaseSearchProvider):
         results: list[SearchResult] = []
 
         for item in self.SAMPLE_DATA:
+            if not self._domain_allowed(item["domain"], domains):
+                continue
             matches = any(k in sanitized for k in item["query_keywords"])
             if matches:
                 results.append(
@@ -72,16 +95,17 @@ class MockSearchAdapter(BaseSearchProvider):
                 )
 
         if not results:
-            # Fallback to general statutory sample
-            item = self.SAMPLE_DATA[0]
-            results.append(
-                SearchResult(
-                    title=item["title"],
-                    url=item["url"],
-                    snippet=item["snippet"],
-                    domain=item["domain"],
-                    score=0.8,
-                )
-            )
+            for item in self.SAMPLE_DATA:
+                if self._domain_allowed(item["domain"], domains):
+                    results.append(
+                        SearchResult(
+                            title=item["title"],
+                            url=item["url"],
+                            snippet=item["snippet"],
+                            domain=item["domain"],
+                            score=0.8,
+                        )
+                    )
+                    break
 
         return results[:max_results]

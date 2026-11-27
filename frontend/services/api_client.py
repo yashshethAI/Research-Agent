@@ -72,14 +72,12 @@ class BackendAPIClient:
         query: str,
         conversation_id: str | None = None,
         user_role: str = "Professional",
-        attachment_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         payload = {
             "query": query,
             "conversation_id": conversation_id,
             "user_role": user_role,
             "stream": False,
-            "attachment_ids": attachment_ids or [],
         }
         with httpx.Client(timeout=360) as client:
             resp = client.post(f"{self.base_url}/api/v1/chat", json=payload)
@@ -92,7 +90,6 @@ class BackendAPIClient:
         query: str,
         conversation_id: str | None = None,
         user_role: str = "Professional",
-        attachment_ids: list[str] | None = None,
     ) -> Iterator[dict[str, Any]]:
         """Streams real-time research events and final answer via Server-Sent Events (SSE)."""
         payload = {
@@ -100,7 +97,6 @@ class BackendAPIClient:
             "conversation_id": conversation_id,
             "user_role": user_role,
             "stream": True,
-            "attachment_ids": attachment_ids or [],
         }
         with httpx.Client(timeout=360) as client:
             with client.stream("POST", f"{self.base_url}/api/v1/chat/stream", json=payload) as response:
@@ -114,14 +110,6 @@ class BackendAPIClient:
                                 yield json.loads(raw_json)
                             except json.JSONDecodeError:
                                 pass
-
-    def upload_document(self, filename: str, content: bytes) -> dict[str, Any]:
-        files = {"file": (filename, content)}
-        with httpx.Client(timeout=30) as client:
-            resp = client.post(f"{self.base_url}/api/v1/documents/upload", files=files)
-            if resp.status_code == 200:
-                return resp.json()
-            raise RuntimeError(f"Upload failed: {resp.text}")
 
     def get_research_artifacts(self, research_id: str) -> dict[str, Any]:
         try:

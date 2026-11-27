@@ -41,9 +41,9 @@ class SafeFetcher:
         self.timeout = timeout or settings.SOURCE_FETCH_TIMEOUT
         self.max_size_bytes = (max_size_mb or settings.MAX_SOURCE_SIZE_MB) * 1024 * 1024
 
-    async def fetch(self, url: str) -> FetchedDocument:
+    async def fetch(self, url: str, allow_unverified: bool = False) -> FetchedDocument:
         """Validates and fetches a document safely."""
-        source_validator.assert_valid_url(url)
+        source_validator.assert_valid_url(url, allow_unverified=allow_unverified)
 
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) GST-Legal-Research-Agent/1.0",
@@ -61,7 +61,7 @@ class SafeFetcher:
 
             while redirect_count <= max_redirects:
                 # Re-validate before each hop
-                source_validator.assert_valid_url(current_url)
+                source_validator.assert_valid_url(current_url, allow_unverified=allow_unverified)
 
                 try:
                     resp = await client.get(current_url, headers=headers)

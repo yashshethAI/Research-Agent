@@ -3,10 +3,10 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from backend.app.agents.nodes.citation_validator import citation_validator_node
-from backend.app.agents.nodes.official_source_search import official_source_search_node
+from backend.app.agents.nodes.retrieve_evidence import retrieve_evidence_node
 from backend.app.agents.state import ResearchState
 from backend.app.core.config import settings
+from backend.app.tools.fetcher import FetchedDocument, safe_fetcher
 from backend.app.tools.search.base import SearchNotConfiguredError, SearchResult
 from backend.app.tools.search.searxng_adapter import SearXNGSearchAdapter
 from backend.app.tools.source_validator import source_validator
@@ -79,10 +79,8 @@ async def test_searxng_search_parses_results_and_sanitizes_pii(monkeypatch):
     assert req_params["engines"] == "google,duckduckgo"
     assert "[REDACTED_GSTIN]" in req_params["q"]
     assert "27AABCU9603R1ZN" not in req_params["q"]
-    # Existing site: clause preserved without appending duplicate OR clauses
     assert req_params["q"].count("site:") == 1
 
-    # Results sorted by score descending
     assert len(results) == 2
     assert results[0].url == "https://www.cbic.gov.in/circular-211.pdf"
     assert results[0].domain == "www.cbic.gov.in"
@@ -103,18 +101,18 @@ async def test_searxng_injects_site_clauses_when_missing(monkeypatch):
     adapter = SearXNGSearchAdapter(base_url="http://localhost:8080")
     await adapter.search(
         query="Section 16(4) judgment",
-        domains=["sci.gov.in", "www.sci.gov.in", "indiankanoon.org"],
+        domains=["sci.gov.in", "www.sci.gov.in", "gstat.gov.in"],
         time_range="invalid_range",
     )
 
     assert len(captured_queries) == 1
     q = captured_queries[0]
-    assert "(site:sci.gov.in OR site:indiankanoon.org)" in q
+    assert "(site:sci.gov.in OR site:gstat.gov.in)" in q
     assert "www.sci.gov.in" not in q
 
 
 @pytest.mark.asyncio
-async def test_searxng_chunks_full_allowed_domains_and_deduplicates(monkeypatch):
+async def test_searxng_chunks_tier1_domains_and_deduplicates(monkeypatch):
     captured_queries: list[str] = []
 
     def handler(url, params, headers):
@@ -144,9 +142,9 @@ async def test_searxng_chunks_full_allowed_domains_and_deduplicates(monkeypatch)
                         "score": 5.0,
                     },
                     {
-                        "title": "Taxmann Ruling",
-                        "url": "https://www.taxmann.com/post/gst-ruling",
-                        "content": "High Court ruling",
+                        "title": "India Code CGST Act",
+                        "url": "https://www.indiacode.nic.in/handle/cgst",
+                        "content": "Bare Act text",
                         "score": 4.0,
                     },
                 ]
@@ -156,14 +154,29 @@ async def test_searxng_chunks_full_allowed_domains_and_deduplicates(monkeypatch)
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler, **kwargs))
 
     adapter = SearXNGSearchAdapter(base_url="http://localhost:8080")
-    results = await adapter.search(query="ITC judgment", domains=settings.allowed_domains, max_results=10)
+    results = await adapter.search(query="ITC judgment", domains=settings.official_domains, max_results=10)
 
-    # Full allowlist split into 2 compact priority domain groups
     assert len(captured_queries) == 2
     assert len(results) == 2
     assert results[0].url == "https://taxinformation.cbic.gov.in/sec16"
     assert results[0].score == 5.0
-    assert results[1].url == "https://www.taxmann.com/post/gst-ruling"
+    assert results[1].url == "https://www.indiacode.nic.in/handle/cgst"
+
+
+@pytest.mark.asyncio
+async def test_searxng_open_web_fallback_runs_without_site_clause(monkeypatch):
+    captured_queries: list[str] = []
+
+    def handler(url, params, headers):
+        captured_queries.append(params["q"])
+        return httpx.Response(200, json={"results": []})
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler, **kwargs))
+
+    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080")
+    await adapter.search(query="Section 16(5) retrospective ITC", domains=[])
+
+    assert captured_queries == ["Section 16(5) retrospective ITC"]
 
 
 @pytest.mark.asyncio
@@ -210,16 +223,18 @@ async def test_searxng_health_check_variants(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_official_source_search_node_uses_searxng_and_filters_domains(monkeypatch):
+async def test_retrieve_evidence_tier1_filters_domains_and_respects_time_range(monkeypatch):
     monkeypatch.setattr(settings, "SEARCH_PROVIDER", "searxng")
     monkeypatch.setattr(settings, "SEARXNG_BASE_URL", "http://localhost:8080")
+    captured_time_ranges: list[str | None] = []
 
     async def mock_search(self, query, domains=None, max_results=10, time_range=None):
+        captured_time_ranges.append(time_range)
         return [
             SearchResult(
                 title="Official CBIC",
                 url="https://taxinformation.cbic.gov.in/sec16",
-                snippet="Official text",
+                snippet="Section 16(4) official text",
                 domain="taxinformation.cbic.gov.in",
                 score=5.0,
             ),
@@ -232,29 +247,71 @@ async def test_official_source_search_node_uses_searxng_and_filters_domains(monk
             ),
         ]
 
+    async def mock_fetch(url: str, allow_unverified: bool = False):
+        return FetchedDocument(
+            url=url,
+            content=b"<html><body><h1>Section 16(4) CGST Act</h1><p>Eligibility conditions for input tax credit under Section 16(4) and Section 16(5) retrospective relief.</p></body></html>",
+            content_type="text/html",
+            status_code=200,
+            sha256_hash="hash123456",
+            file_path="",
+        )
+
     monkeypatch.setattr(SearXNGSearchAdapter, "search", mock_search)
     monkeypatch.setattr(
         source_validator,
         "validate_url",
-        lambda url: ("taxinformation.cbic.gov.in" in url, "mock validation"),
+        lambda url, allow_unverified=False: ("taxinformation.cbic.gov.in" in url, "mock validation"),
     )
+    monkeypatch.setattr(safe_fetcher, "fetch", mock_fetch)
 
     state = ResearchState(
-        query="Latest Section 16(4) amendment",
+        query="Current Section 16(4) amendment",
         search_queries=["Section 16(4) CGST Act"],
+        search_tier="official",
+        search_time_range=None,
     )
-    out = await official_source_search_node(state)
-    assert out["current_step"] == "official_source_search"
-    assert len(out["search_results"]) == 1
-    assert out["search_results"][0]["url"] == "https://taxinformation.cbic.gov.in/sec16"
+    out = await retrieve_evidence_node(state)
+    assert out["current_step"] == "retrieve_evidence"
+    # No blind time_range="year" on "Current" / "amendment"
+    assert captured_time_ranges == [None]
+    assert len(out["evidence_records"]) == 1
+    assert out["evidence_records"][0]["url"] == "https://taxinformation.cbic.gov.in/sec16"
+    assert out["evidence_records"][0]["source_tier"] == "official"
 
 
 @pytest.mark.asyncio
-async def test_citation_validator_triggers_retry_for_searxng(monkeypatch):
+async def test_retrieve_evidence_escalates_tier1_to_tier2_and_tier3(monkeypatch):
     monkeypatch.setattr(settings, "SEARCH_PROVIDER", "searxng")
     monkeypatch.setattr(settings, "SEARXNG_BASE_URL", "http://localhost:8080")
+    monkeypatch.setattr(settings, "ALLOW_UNVERIFIED_FALLBACK", True)
 
-    state = ResearchState(evidence_records=[], retry_count=0)
-    out = await citation_validator_node(state)
-    assert out["should_refine_search"] is True
-    assert out["retry_count"] == 1
+    async def mock_empty_search(self, query, domains=None, max_results=10, time_range=None):
+        return []
+
+    monkeypatch.setattr(SearXNGSearchAdapter, "search", mock_empty_search)
+
+    # Pass 1: official -> escalates to verified_secondary
+    state1 = ResearchState(query="Corporate guarantee valuation", search_queries=["corporate guarantee rule 28(2)"], search_tier="official", retry_count=0)
+    out1 = await retrieve_evidence_node(state1)
+    assert out1["should_refine_search"] is True
+    assert out1["search_tier"] == "verified_secondary"
+    assert out1["retry_count"] == 1
+
+    # Pass 2: verified_secondary -> escalates to unverified_fallback because ALLOW_UNVERIFIED_FALLBACK=True
+    state2 = ResearchState(
+        query="Corporate guarantee valuation",
+        search_queries=out1["search_queries"],
+        search_tier=out1["search_tier"],
+        retry_count=out1["retry_count"],
+        attempted_tiers=out1["attempted_tiers"],
+    )
+    out2 = await retrieve_evidence_node(state2)
+    assert out2["should_refine_search"] is True
+    assert out2["search_tier"] == "unverified_fallback"
+    assert out2["retry_count"] == 2
+
+    # When ALLOW_UNVERIFIED_FALLBACK is False, stops after verified_secondary
+    monkeypatch.setattr(settings, "ALLOW_UNVERIFIED_FALLBACK", False)
+    out2_disabled = await retrieve_evidence_node(state2)
+    assert out2_disabled["should_refine_search"] is False

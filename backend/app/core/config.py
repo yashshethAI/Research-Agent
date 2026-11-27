@@ -40,15 +40,17 @@ class Settings(BaseSettings):
     MAX_SEARCH_RESULTS: int = 20
     MAX_FETCH_SOURCES: int = 8
     MAX_RESEARCH_RETRIES: int = 2
+    MIN_OFFICIAL_SOURCES_SUFFICIENT: int = 2
+    MAX_EVIDENCE_SOURCES_FOR_LLM: int = 5
 
     # Source Validation & Security
     ENFORCE_OFFICIAL_DOMAINS: bool = True
+    ALLOW_UNVERIFIED_FALLBACK: bool = False
     SOURCE_FETCH_TIMEOUT: int = 30
     MAX_SOURCE_SIZE_MB: int = 20
 
     # Storage
     DATA_DIR: str = "./data"
-    MAX_UPLOAD_SIZE_MB: int = 20
     MAX_CONVERSATION_HISTORY: int = 30
 
     # Security & Logging
@@ -103,18 +105,11 @@ class Settings(BaseSettings):
         p.mkdir(parents=True, exist_ok=True)
         return p
 
-    @property
-    def uploads_dir(self) -> Path:
-        p = self.root_data_dir / "uploads"
-        p.mkdir(parents=True, exist_ok=True)
-        return p
-
     def get_sources_registry(self) -> dict[str, Any]:
-        """Loads config/sources.yaml official registry."""
+        """Loads config/sources.yaml 3-tier source registry."""
         if self._sources_registry is not None:
             return self._sources_registry
 
-        # Search for sources.yaml relative to current working directory or app root
         candidates = [
             Path("config/sources.yaml"),
             Path(__file__).resolve().parent.parent.parent.parent / "config" / "sources.yaml",
@@ -125,28 +120,62 @@ class Settings(BaseSettings):
                     self._sources_registry = yaml.safe_load(f) or {}
                     return self._sources_registry
 
-        self._sources_registry = {"official_sources": [], "authority_hierarchy": []}
+        self._sources_registry = {
+            "official_sources": [],
+            "verified_secondary_sources": [],
+            "unverified_fallback_policy": {"blocked_domains": []},
+            "authority_hierarchy": [],
+        }
         return self._sources_registry
 
-    @property
-    def allowed_domains(self) -> list[str]:
-        """Returns list of allowed domain names from sources.yaml."""
+    def _extract_domains_from_section(self, section_name: str) -> list[str]:
         registry = self.get_sources_registry()
         domains: list[str] = []
-        for s in registry.get("official_sources", []):
-            for d in s.get("domains", []):
+        for s in registry.get(section_name, []) or []:
+            for d in s.get("domains", []) or []:
                 cleaned = d.strip().lower()
                 if cleaned and cleaned not in domains:
                     domains.append(cleaned)
         return domains
 
-    def get_priority_search_domains(self, max_domains: int = 12) -> list[str]:
-        """Returns priority-ordered canonical root domains across official sources."""
+    @property
+    def official_domains(self) -> list[str]:
+        """Tier 1 official government, statutory, and judicial domains."""
+        return self._extract_domains_from_section("official_sources")
+
+    @property
+    def verified_secondary_domains(self) -> list[str]:
+        """Tier 2 verified institutional and legal/tax reporter domains."""
+        return self._extract_domains_from_section("verified_secondary_sources")
+
+    @property
+    def blocked_domains(self) -> list[str]:
+        """Domains excluded from open-web fallback searches."""
         registry = self.get_sources_registry()
-        sources = sorted(
-            registry.get("official_sources", []),
-            key=lambda s: s.get("priority", 99),
-        )
+        policy = registry.get("unverified_fallback_policy") or {}
+        return [d.strip().lower() for d in policy.get("blocked_domains", []) if d and d.strip()]
+
+    @property
+    def allowed_domains(self) -> list[str]:
+        """Combined Tier 1 + Tier 2 allowlisted domains from sources.yaml."""
+        combined: list[str] = []
+        for d in [*self.official_domains, *self.verified_secondary_domains]:
+            if d not in combined:
+                combined.append(d)
+        return combined
+
+    def get_priority_search_domains(self, max_domains: int = 12, section: str | None = None) -> list[str]:
+        """Returns priority-ordered canonical domains from sources.yaml (or a specific tier section)."""
+        registry = self.get_sources_registry()
+        if section:
+            raw_sources = list(registry.get(section, []) or [])
+        else:
+            raw_sources = [
+                *(registry.get("official_sources", []) or []),
+                *(registry.get("verified_secondary_sources", []) or []),
+            ]
+
+        sources = sorted(raw_sources, key=lambda s: s.get("priority", 99))
 
         source_domain_lists: list[list[str]] = []
         for s in sources:
@@ -161,7 +190,6 @@ class Settings(BaseSettings):
                 source_domain_lists.append(deduped)
 
         selected: list[str] = []
-        # First pass: take primary canonical domain from each source in priority order
         for d_list in source_domain_lists:
             primary = d_list[0]
             if primary not in selected:
@@ -169,7 +197,6 @@ class Settings(BaseSettings):
                 if len(selected) >= max_domains:
                     return selected
 
-        # Second pass: backfill secondary domains if still below max_domains
         for d_list in source_domain_lists:
             for d in d_list[1:]:
                 if d not in selected:
@@ -178,6 +205,33 @@ class Settings(BaseSettings):
                         return selected
 
         return selected
+
+    def get_tier_domains(self, tier: str, max_domains: int = 12) -> list[str]:
+        """Returns canonical search domains for 'official', 'verified_secondary', or 'unverified_fallback'."""
+        if tier == "official":
+            return self.get_priority_search_domains(max_domains=max_domains, section="official_sources")
+        if tier == "verified_secondary":
+            return self.get_priority_search_domains(max_domains=max_domains, section="verified_secondary_sources")
+        if tier == "unverified_fallback":
+            return []
+        return self.get_priority_search_domains(max_domains=max_domains)
+
+    def get_domain_authority_info(self, domain: str) -> tuple[str, int, str]:
+        """Looks up (tier, priority, authority_name) for a domain from sources.yaml."""
+        d = (domain or "").strip().lower()
+        registry = self.get_sources_registry()
+
+        for section, tier_label in (
+            ("official_sources", "official"),
+            ("verified_secondary_sources", "verified_secondary"),
+        ):
+            for entry in registry.get(section, []) or []:
+                for allowed in entry.get("domains", []) or []:
+                    allowed_l = allowed.strip().lower()
+                    if d == allowed_l or d.endswith("." + allowed_l):
+                        return tier_label, int(entry.get("priority", 5)), entry.get("authority") or entry.get("name", "GST Source")
+
+        return "unverified_fallback", 10, "Open Web Fallback Source (Unverified)"
 
 
 # Global settings singleton

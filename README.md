@@ -142,7 +142,8 @@ cp .env.example .env
 | `SEARXNG_BASE_URL` | Base URL of local or private SearXNG instance | `http://localhost:8080` |
 | `SEARXNG_TIMEOUT` | SearXNG HTTP request timeout in seconds | `30` |
 | `SEARXNG_ENGINES` | Optional comma-separated SearXNG engines override | *(Default engines)* |
-| `ENFORCE_OFFICIAL_DOMAINS` | Restrict fetching strictly to official GST portals | `true` |
+| `ENFORCE_OFFICIAL_DOMAINS` | Restrict Tier 1/2 fetching to `config/sources.yaml` | `true` |
+| `ALLOW_UNVERIFIED_FALLBACK` | Enable Tier 3 open-web fallback when Tier 1 & 2 miss | `false` |
 | `DATA_DIR` | Local storage root path | `./data` |
 
 #### Example LLM Configurations:
@@ -220,46 +221,45 @@ GST_AGENT/
 │       ├── api/                        # REST & SSE streaming routers
 │       │   ├── chat.py                 # Chat & SSE endpoint (/chat, /chat/stream)
 │       │   ├── conversations.py        # Conversation CRUD (/conversations)
-│       │   ├── documents.py            # Document upload handler (/documents/upload)
 │       │   └── research.py             # Research artifact viewer (/research/{id})
 │       ├── agents/
-│       │   ├── graph.py                # LangGraph 13-node state graph
+│       │   ├── graph.py                # LangGraph 5-node tiered state graph
 │       │   ├── state.py                # Pydantic ResearchState definition
-│       │   ├── prompts.py              # GST legal research system prompts
-│       │   └── nodes/                  # 13 discrete LangGraph nodes
+│       │   ├── prompts.py              # GST legal research prompts (<26B hardened)
+│       │   └── nodes/                  # 5 LangGraph orchestration nodes
 │       ├── llm/
 │       │   └── factory.py              # ChatOpenAI factory & health checker
 │       ├── tools/
-│       │   ├── source_validator.py     # SSRF filter & official domain allowlist
+│       │   ├── source_validator.py     # SSRF filter & 3-tier domain validator
 │       │   ├── fetcher.py              # Async HTTPX safe document fetcher
 │       │   ├── html_parser.py          # BeautifulSoup4 statutory extractor
 │       │   ├── pdf_parser.py           # PyMuPDF notification/circular extractor
+│       │   ├── evidence_extractor.py   # BM25 passage scorer & tier escalation
 │       │   └── search/                 # Provider-independent search
 │       │       ├── base.py             # Search interface & privacy sanitizer
-│       │       ├── searxng_adapter.py  # SearXNG official search adapter
+│       │       ├── searxng_adapter.py  # SearXNG tiered search adapter
 │       │       └── mock_adapter.py     # Offline GST test adapter
 │       ├── storage/                    # Filesystem persistence engine
 │       │   ├── conversations.py        # Thread-safe JSONL conversation store
 │       │   ├── research.py             # Structured research session store
 │       │   └── source_cache.py         # Download cache with SHA-256 indexing
 │       ├── schemas/                    # Pydantic API schemas
-│       └── core/                       # App configuration & settings
+│       └── core/                       # Config & correlated logging utilities
 │
 ├── frontend/
 │   ├── app.py                          # Streamlit application dashboard
 │   ├── components/
 │   │   ├── sidebar.py                  # Persona selector & conversation history
-│   │   └── evidence_panel.py           # Expandable official source evidence viewer
+│   │   └── evidence_panel.py           # Expandable tiered source evidence viewer
 │   └── services/
 │       └── api_client.py               # HTTP/SSE client connecting to FastAPI
 │
 ├── config/
-│   └── sources.yaml                    # Official GST authority domain allowlist
+│   └── sources.yaml                    # 3-tier GST authority & secondary source registry
 ├── data/                               # Local-first persistence (excluded from Git)
 │   ├── conversations/                  # JSONL conversation histories
-│   ├── research_sessions/              # Persisted research artifacts
-│   ├── downloaded_sources/             # Raw cached documents by authority
-│   └── uploads/                        # User-uploaded PDF notices/agreements
+│   ├── research_sessions/              # Persisted research & diagnostic artifacts
+│   └── downloaded_sources/             # Raw cached documents by authority
 ├── tests/                              # Automated Pytest suite (25 tests)
 ├── scripts/                            # Runner shell scripts
 ├── .env.example                        # Template environment variables

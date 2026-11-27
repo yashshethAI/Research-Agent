@@ -9,24 +9,21 @@ from fastapi.responses import JSONResponse
 
 from backend.app.api.chat import router as chat_router
 from backend.app.api.conversations import router as conversations_router
-from backend.app.api.documents import router as documents_router
 from backend.app.api.research import router as research_router
 from backend.app.core.config import settings
+from backend.app.core.logging_utils import configure_correlated_logging
 from backend.app.llm.factory import llm_factory
 from backend.app.schemas.api import ConfigStatusResponse
 from backend.app.tools.search.searxng_adapter import SearXNGSearchAdapter
 
-# Configure logging
-logging.basicConfig(
-    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+# Configure correlated logging
+configure_correlated_logging(settings.LOG_LEVEL)
 logger = logging.getLogger("gst_practice_copilot")
 
 app = FastAPI(
     title=settings.APP_NAME,
     description="Backend API for Indian GST Practice Copilot & Legal Research Engine",
-    version="1.0.0",
+    version="1.1.0",
 )
 
 # CORS Middleware (Localhost-first)
@@ -43,7 +40,6 @@ api_v1_prefix = "/api/v1"
 app.include_router(chat_router, prefix=api_v1_prefix)
 app.include_router(conversations_router, prefix=api_v1_prefix)
 app.include_router(research_router, prefix=api_v1_prefix)
-app.include_router(documents_router, prefix=api_v1_prefix)
 
 
 async def _check_search_health() -> tuple[bool, str]:
@@ -77,6 +73,7 @@ async def health_check() -> dict:
             "reachable": search_ok,
             "provider": settings.SEARCH_PROVIDER,
             "base_url": settings.SEARXNG_BASE_URL if settings.SEARCH_PROVIDER == "searxng" else None,
+            "allow_unverified_fallback": settings.ALLOW_UNVERIFIED_FALLBACK,
             "message": search_msg,
         },
     }
@@ -107,7 +104,9 @@ async def config_status() -> ConfigStatusResponse:
         search_reachable=search_ok,
         search_base_url=settings.SEARXNG_BASE_URL if settings.SEARCH_PROVIDER == "searxng" else None,
         search_status_message=search_msg,
-        official_domains_count=len(settings.allowed_domains),
+        official_domains_count=len(settings.official_domains),
+        verified_secondary_domains_count=len(settings.verified_secondary_domains),
+        allow_unverified_fallback=settings.ALLOW_UNVERIFIED_FALLBACK,
         data_dir_writable=data_writable,
     )
 

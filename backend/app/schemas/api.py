@@ -13,7 +13,6 @@ class ChatRequest(BaseModel):
         description="Active persona: 'Professional', 'Intern / Article Assistant', or 'Partner / Counsel'",
     )
     stream: bool = Field(default=False, description="Whether to stream response via SSE")
-    attachment_ids: list[str] | None = Field(default=None, description="List of uploaded document IDs")
 
 
 class ChatResponse(BaseModel):
@@ -25,6 +24,8 @@ class ChatResponse(BaseModel):
     needs_clarification: bool = False
     clarification_prompt: str | None = None
     llm_configured: bool = True
+    search_tiers_used: list[str] = Field(default_factory=list)
+    node_errors: list[dict[str, Any]] = Field(default_factory=list)
     status: str = "completed"
 
 
@@ -40,6 +41,8 @@ class ConfigStatusResponse(BaseModel):
     search_base_url: str | None = None
     search_status_message: str | None = None
     official_domains_count: int
+    verified_secondary_domains_count: int = 0
+    allow_unverified_fallback: bool = False
     data_dir_writable: bool
 
 
@@ -54,11 +57,3 @@ class ConversationSummary(BaseModel):
 class ConversationDetail(BaseModel):
     conversation_id: str
     messages: list[dict[str, Any]]
-
-
-class DocumentUploadResponse(BaseModel):
-    file_id: str
-    filename: str
-    size_bytes: int
-    sha256_hash: str
-    message: str

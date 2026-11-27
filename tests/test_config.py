@@ -13,8 +13,10 @@ def test_settings_default_values():
     assert s.SEARXNG_BASE_URL == "http://localhost:8080"
     assert s.SEARXNG_TIMEOUT == 30
     assert s.MAX_RESEARCH_RETRIES == 2
+    assert s.MIN_OFFICIAL_SOURCES_SUFFICIENT == 2
+    assert s.MAX_EVIDENCE_SOURCES_FOR_LLM == 5
+    assert s.ALLOW_UNVERIFIED_FALLBACK is False
     assert s.MAX_SOURCE_SIZE_MB == 20
-    assert s.MAX_UPLOAD_SIZE_MB == 20
     assert s.MAX_SEARCH_RESULTS == 20
     assert s.MAX_FETCH_SOURCES == 8
 
@@ -41,33 +43,54 @@ def test_is_search_configured_logic():
     assert s4.is_search_configured is False
 
 
-def test_priority_search_domains_dedupes_www_and_balances_sources():
+def test_priority_search_domains_tiered():
     s = Settings(_env_file=None)
-    priority_12 = s.get_priority_search_domains(max_domains=12)
-    assert len(priority_12) == 12
-    assert "taxinformation.cbic.gov.in" in priority_12
-    assert "cbic.gov.in" in priority_12
-    assert "www.cbic.gov.in" not in priority_12
-    assert "sci.gov.in" in priority_12
-    assert "indiankanoon.org" in priority_12
-    assert "cestat.gov.in" in priority_12
+    tier1 = s.get_tier_domains("official", max_domains=12)
+    assert len(tier1) == 12
+    assert "taxinformation.cbic.gov.in" in tier1
+    assert "cbic.gov.in" in tier1
+    assert "www.cbic.gov.in" not in tier1
+    assert "gstcouncil.gov.in" in tier1
+    assert "gst.gov.in" in tier1
+    assert "gstat.gov.in" in tier1
+    assert "indiacode.nic.in" in tier1
+    assert "sci.gov.in" in tier1
 
-    priority_15 = s.get_priority_search_domains(max_domains=15)
-    assert "taxmann.com" in priority_15
-    assert "livelaw.in" in priority_15
+    tier2 = s.get_tier_domains("verified_secondary", max_domains=12)
+    assert "idtc.icai.org" in tier2
+    assert "taxmann.com" in tier2
+    assert "taxsutra.com" in tier2
+    assert "centaxonline.com" in tier2
+    assert "livelaw.in" in tier2
+    assert "barandbench.com" in tier2
+    assert "taxo.online" in tier2
+    assert "cleartax.in" in tier2
+    assert "vinodkothari.com" in tier2
+
+    assert s.get_tier_domains("unverified_fallback") == []
 
 
-def test_allowed_domains_loaded_from_sources_yaml():
-    s = Settings()
-    domains = s.allowed_domains
-    assert isinstance(domains, list)
-    assert len(domains) > 0
-    assert "taxinformation.cbic.gov.in" in domains
-    assert "cbic.gov.in" in domains
-    assert "gst.gov.in" in domains
-    assert "gstcouncil.gov.in" in domains
-    assert "sci.gov.in" in domains
-    assert "icai.org" in domains
-    assert "indiankanoon.org" in domains
-    assert "taxmann.com" in domains
-    assert "cleartax.in" in domains
+def test_tiered_domains_and_authority_lookup():
+    s = Settings(_env_file=None)
+    assert "taxinformation.cbic.gov.in" in s.official_domains
+    assert "gstat.gov.in" in s.official_domains
+    assert "pib.gov.in" in s.official_domains
+    assert "dgft.gov.in" in s.official_domains
+    assert "icegate.gov.in" in s.official_domains
+
+    assert "taxmann.com" in s.verified_secondary_domains
+    assert "taxsutra.com" in s.verified_secondary_domains
+    assert "vinodkothari.com" in s.verified_secondary_domains
+
+    assert set(s.official_domains).issubset(set(s.allowed_domains))
+    assert set(s.verified_secondary_domains).issubset(set(s.allowed_domains))
+
+    tier1, prio1, _ = s.get_domain_authority_info("taxinformation.cbic.gov.in")
+    assert tier1 == "official"
+    assert prio1 == 1
+
+    tier2, _, _ = s.get_domain_authority_info("www.taxsutra.com")
+    assert tier2 == "verified_secondary"
+
+    tier3, _, _ = s.get_domain_authority_info("some-random-blog.example")
+    assert tier3 == "unverified_fallback"

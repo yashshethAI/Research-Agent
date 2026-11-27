@@ -141,7 +141,7 @@ class LLMFactory:
         except Exception as e:
             return False, f"LLM health check failed: {e!s}"
 
-    def get_chat_model(self) -> BaseChatModel:
+    def get_chat_model(self, max_tokens: int | None = None) -> BaseChatModel:
         """Returns an instance of ChatOpenAI pointed at the configured OpenAI-compatible endpoint."""
         if not self.is_configured():
             raise LLMNotConfiguredError(
@@ -152,15 +152,19 @@ class LLMFactory:
                 "  LLM_API_KEY=none                      # (if authentication is not required)\n"
             )
 
-        return ChatOpenAI(
-            base_url=self.base_url,
-            api_key=self.api_key,
-            model=self.model_name,
-            temperature=self.temperature,
-            timeout=self.timeout,
-            max_retries=self.max_retries,
-            default_headers=self.get_default_headers(),
-        )
+        kwargs: dict[str, Any] = {
+            "base_url": self.base_url,
+            "api_key": self.api_key,
+            "model": self.model_name,
+            "temperature": self.temperature,
+            "timeout": self.timeout,
+            "max_retries": self.max_retries,
+            "default_headers": self.get_default_headers(),
+        }
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+
+        return ChatOpenAI(**kwargs)
 
 
 # Global factory instance
