@@ -4,13 +4,19 @@ from typing import Any
 
 import streamlit as st
 
+_TIER_BADGES = {
+    "official": ("Tier 1: Official", "#0d47a1"),
+    "verified_secondary": ("Tier 2: Verified Secondary", "#2e7d32"),
+    "unverified_fallback": ("Tier 3: Unverified Fallback", "#e65100"),
+}
+
 
 def render_evidence_panel(evidence_records: list[dict[str, Any]]) -> None:
-    """Renders structured, clickable legal evidence retrieved from official sources."""
+    """Renders structured, clickable legal evidence retrieved across source tiers."""
     if not evidence_records:
         return
 
-    with st.expander(f"📑 Verified Legal Evidence ({len(evidence_records)} Official Sources)", expanded=False):
+    with st.expander(f"📑 Retrieved Legal Evidence ({len(evidence_records)} Sources)", expanded=False):
         for e in evidence_records:
             src_id = e.get("source_id", "SRC")
             title = e.get("title", "Official Source")
@@ -18,15 +24,23 @@ def render_evidence_panel(evidence_records: list[dict[str, Any]]) -> None:
             authority = e.get("authority", "GST Authority")
             sec_rule = e.get("section_or_rule", "General Law")
             excerpt = e.get("excerpt", "")
-            sha_hash = e.get("sha256_hash", "")[:12]
+            sha_hash = (e.get("sha256_hash") or "")[:12]
+            tier = e.get("source_tier", "official")
+            fetch_status = e.get("fetch_status", "fetched")
+            tier_label, tier_color = _TIER_BADGES.get(tier, ("Source", "#455a64"))
 
             st.markdown(
                 f"""
                 <div style="border: 1px solid #e0e0e0; border-radius: 6px; padding: 12px; margin-bottom: 12px; background-color: #fdfdfd;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                        <span style="background-color: #0d47a1; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold;">
-                            {src_id}
-                        </span>
+                        <div>
+                            <span style="background-color: #0d47a1; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold;">
+                                {src_id}
+                            </span>
+                            <span style="background-color: {tier_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.78em; margin-left: 6px;">
+                                {tier_label} ({fetch_status})
+                            </span>
+                        </div>
                         <span style="font-size: 0.8em; color: #666;">
                             <b>SHA-256:</b> <code>{sha_hash}</code>
                         </span>

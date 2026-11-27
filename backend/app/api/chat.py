@@ -19,25 +19,17 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 
 
 NODE_STEP_LABELS: dict[str, str] = {
-    "load_conversation": "Loaded conversation history",
-    "query_understanding": "Parsed GST topics, tax periods, and material facts",
-    "fact_extraction": "Consolidated material facts and assumptions",
-    "research_planner": "Formulated statutory lookup & authority plan",
-    "search_query_generation": "Generated sanitized official search queries",
-    "official_source_search": "Queried official CBIC / GST portal registries",
-    "source_fetcher": "Safely retrieved official statutory documents",
-    "document_extractor": "Extracted statutory provisions and circular texts",
-    "evidence_compiler": "Indexed and structured legal evidence records",
-    "legal_analysis": "Completed date-aware statutory legal analysis",
-    "citation_validator": "Audited citations against official sources",
-    "answer_generator": "Synthesized legal explanation with inline source links",
-    "persistence_node": "Persisted session artifacts to local storage",
+    "understand_query": "Analyzed query, conversation history & research plan",
+    "retrieve_evidence": "Searched sources & extracted query-relevant passages",
+    "synthesize_answer": "Drafted plain-English bulleted GST advisory",
+    "validate_citations": "Audited inline links and statutory citations",
+    "save_session": "Persisted conversation and diagnostic trace",
 }
 
 
 @router.post("", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest) -> ChatResponse:
-    """Executes a GST legal research session synchronously through LangGraph."""
+    """Executes a GST legal research session synchronously through the 5-node LangGraph."""
     conv_id = request.conversation_id or str(uuid.uuid4())
     res_id = str(uuid.uuid4())
 
@@ -46,12 +38,10 @@ async def chat_endpoint(request: ChatRequest) -> ChatResponse:
         research_id=res_id,
         query=request.query,
         user_role=request.user_role,
-        attachment_ids=request.attachment_ids or [],
     )
 
     try:
         final_state = await gst_research_graph.ainvoke(initial_state)
-        # Handle dict or ResearchState return from graph
         state_dict = final_state if isinstance(final_state, dict) else final_state.model_dump()
 
         return ChatResponse(
@@ -63,11 +53,16 @@ async def chat_endpoint(request: ChatRequest) -> ChatResponse:
             needs_clarification=state_dict.get("needs_clarification", False),
             clarification_prompt=state_dict.get("clarification_prompt"),
             llm_configured=llm_factory.is_configured(),
+            search_tiers_used=state_dict.get("attempted_tiers", []),
+            node_errors=state_dict.get("node_errors", []),
             status="completed",
         )
     except Exception as e:
-        logger.error(f"Error executing research graph: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Research graph execution failed: {e!s}")
+        logger.error(f"Error executing research graph (conv={conv_id[:8]} res={res_id[:8]}): {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Research graph execution failed (research_id={res_id}): {type(e).__name__}: {e!s}",
+        )
 
 
 @router.post("/stream")
@@ -81,42 +76,50 @@ async def chat_stream_endpoint(request: ChatRequest) -> StreamingResponse:
         research_id=res_id,
         query=request.query,
         user_role=request.user_role,
-        attachment_ids=request.attachment_ids or [],
     )
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
-            # Emit start event
             yield f"data: {json.dumps({'event': 'started', 'conversation_id': conv_id, 'research_id': res_id})}\n\n"
 
-            # Stream intermediate node steps and track accumulated outputs
             final_report = ""
             evidence_records: list[dict[str, Any]] = []
             citations: list[dict[str, Any]] = []
             needs_clarification = False
+            attempted_tiers: list[str] = []
+            node_errors: list[dict[str, Any]] = []
 
             async for event in gst_research_graph.astream(initial_state, stream_mode="updates"):
                 for node_name, node_output in event.items():
+                    tier_label = ""
                     if isinstance(node_output, dict):
                         if node_output.get("final_report"):
                             final_report = node_output["final_report"]
-                        if node_output.get("evidence_records"):
+                        if node_output.get("evidence_records") is not None:
                             evidence_records = node_output["evidence_records"]
                         if node_output.get("citation_validation"):
                             citations = node_output["citation_validation"].get("verified_citations", [])
                         if "needs_clarification" in node_output:
                             needs_clarification = node_output["needs_clarification"]
+                        if node_output.get("attempted_tiers"):
+                            attempted_tiers = node_output["attempted_tiers"]
+                            tier_label = attempted_tiers[-1]
+                        if node_output.get("node_errors"):
+                            node_errors = node_output["node_errors"]
 
                     step_label = NODE_STEP_LABELS.get(node_name, f"Completed node: {node_name}")
+                    if node_name == "retrieve_evidence" and tier_label:
+                        step_label = f"{step_label} (Tier: {tier_label})"
+
                     step_event = {
                         "event": "step",
                         "node": node_name,
+                        "tier": tier_label or None,
                         "label": step_label,
                         "status": "completed",
                     }
                     yield f"data: {json.dumps(step_event)}\n\n"
 
-            # After full graph execution, emit complete event with full response
             complete_event = {
                 "event": "complete",
                 "conversation_id": conv_id,
@@ -125,14 +128,17 @@ async def chat_stream_endpoint(request: ChatRequest) -> StreamingResponse:
                 "evidence": evidence_records,
                 "citations": citations,
                 "needs_clarification": needs_clarification,
+                "search_tiers_used": attempted_tiers,
+                "node_errors": node_errors,
             }
             yield f"data: {json.dumps(complete_event)}\n\n"
 
         except Exception as e:
-            logger.error(f"Error during SSE streaming: {e}", exc_info=True)
+            logger.error(f"Error during SSE streaming (conv={conv_id[:8]} res={res_id[:8]}): {e}", exc_info=True)
             error_event = {
                 "event": "error",
-                "detail": str(e),
+                "research_id": res_id,
+                "detail": f"{type(e).__name__}: {e!s}",
             }
             yield f"data: {json.dumps(error_event)}\n\n"
 

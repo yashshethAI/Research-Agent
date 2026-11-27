@@ -1,5 +1,6 @@
-# Official Indian GST Legal Sources Allowlist & Registry
+# 3-Tier Indian GST Legal Sources Registry
 
+# Tier 1: Official Government, Statutory & Judicial Sources (Always Searched First)
 official_sources:
   - id: cbic_taxinfo
     name: "CBIC Tax Information Portal"
@@ -7,16 +8,9 @@ official_sources:
     authority: "Central Board of Indirect Taxes and Customs (CBIC)"
     priority: 1
     document_types:
-      - "CGST Act, 2017"
-      - "IGST Act, 2017"
-      - "UTGST Act, 2017"
-      - "GST (Compensation to States) Act, 2017"
-      - "CGST Rules, 2017"
-      - "Central Tax Notifications"
-      - "Integrated Tax Notifications"
-      - "CBIC Circulars"
-      - "CBIC Instructions"
-      - "Flyers and Guidance Notes"
+      - "CGST, IGST, and UTGST Bare Acts"
+      - "Updated Rules, Rate & Non-Rate Notifications"
+      - "Circulars, Instructions, and Finance Acts"
     domains:
       - "taxinformation.cbic.gov.in"
 
@@ -31,46 +25,101 @@ official_sources:
       - "Press Releases"
       - "Tariff Schedules"
     domains:
-      - "www.cbic.gov.in"
       - "cbic.gov.in"
-
-  - id: gstn_portal
-    name: "GST System Official Portal"
-    base_url: "https://www.gst.gov.in"
-    authority: "Goods and Services Tax Network (GSTN)"
-    priority: 2
-    document_types:
-      - "GSTN System Advisories"
-      - "Return Filing Guidelines"
-      - "Portal Procedures"
-      - "News and Updates"
-    domains:
-      - "www.gst.gov.in"
-      - "gst.gov.in"
-
-  - id: gstn_tutorial
-    name: "GST Portal User Manuals & Tutorials"
-    base_url: "https://tutorial.gst.gov.in"
-    authority: "Goods and Services Tax Network (GSTN)"
-    priority: 2
-    document_types:
-      - "Form Filing Manuals"
-      - "GSTR-1 / 3B / 9 / 9C Instructions"
-      - "Portal Navigation Guides"
-    domains:
-      - "tutorial.gst.gov.in"
+      - "www.cbic.gov.in"
 
   - id: gst_council
     name: "GST Council Secretariat"
     base_url: "https://gstcouncil.gov.in"
     authority: "GST Council Secretariat, Ministry of Finance"
-    priority: 2
+    priority: 1
     document_types:
-      - "Council Meeting Recommendations"
-      - "Minutes of GST Council Meetings"
-      - "Press Releases"
+      - "Council Meeting Agendas & Minutes"
+      - "Rate Recommendations & GoM Reports"
+      - "AAR & AAAR Portal Directory"
     domains:
       - "gstcouncil.gov.in"
+
+  - id: gstn_portal
+    name: "Goods and Services Tax Network (GST Portal)"
+    base_url: "https://www.gst.gov.in"
+    authority: "Goods and Services Tax Network (GSTN)"
+    priority: 1
+    document_types:
+      - "Operational Advisories & System Updates"
+      - "Return Filing Guidelines & Monthly Revenue Data"
+    domains:
+      - "gst.gov.in"
+      - "www.gst.gov.in"
+
+  - id: gstn_tutorial
+    name: "GST Portal User Manuals & FAQs"
+    base_url: "https://tutorial.gst.gov.in"
+    authority: "Goods and Services Tax Network (GSTN)"
+    priority: 1
+    document_types:
+      - "Return Filing Manuals"
+      - "FAQs & Portal Navigation Guides"
+    domains:
+      - "tutorial.gst.gov.in"
+
+  - id: gstat_portal
+    name: "GST Appellate Tribunal (GSTAT)"
+    base_url: "https://gstat.gov.in"
+    authority: "GST Appellate Tribunal (GSTAT)"
+    priority: 1
+    document_types:
+      - "GSTAT Judgements & Orders"
+      - "Cause Lists, E-Filing Procedures & GSTAT E-Journal"
+    domains:
+      - "gstat.gov.in"
+      - "www.gstat.gov.in"
+
+  - id: india_code
+    name: "India Code"
+    base_url: "https://www.indiacode.nic.in"
+    authority: "Ministry of Law and Justice, Government of India"
+    priority: 1
+    document_types:
+      - "Authenticated Central and State GST Acts"
+      - "Subordinate Legislation"
+    domains:
+      - "indiacode.nic.in"
+      - "www.indiacode.nic.in"
+
+  - id: pib_mof
+    name: "Press Information Bureau (Ministry of Finance)"
+    base_url: "https://pib.gov.in"
+    authority: "Press Information Bureau, Government of India"
+    priority: 2
+    document_types:
+      - "Official Government Explainers"
+      - "Council Meeting Summaries & Statutory Reform Notes"
+    domains:
+      - "pib.gov.in"
+      - "www.pib.gov.in"
+
+  - id: dgft_portal
+    name: "Directorate General of Foreign Trade (DGFT)"
+    base_url: "https://www.dgft.gov.in"
+    authority: "Directorate General of Foreign Trade, Ministry of Commerce"
+    priority: 2
+    document_types:
+      - "Exports, Imports, LUTs, SEZ & RoDTEP Policy"
+    domains:
+      - "dgft.gov.in"
+      - "www.dgft.gov.in"
+
+  - id: icegate_portal
+    name: "ICEGATE Customs Portal"
+    base_url: "https://www.icegate.gov.in"
+    authority: "Central Board of Indirect Taxes and Customs (ICEGATE)"
+    priority: 2
+    document_types:
+      - "Customs-Integrated IGST Refunds & Shipping Bill Advisories"
+    domains:
+      - "icegate.gov.in"
+      - "www.icegate.gov.in"
 
   - id: supreme_court
     name: "Supreme Court of India"
@@ -81,21 +130,20 @@ official_sources:
       - "Judgments"
       - "Orders"
     domains:
-      - "www.sci.gov.in"
       - "sci.gov.in"
+      - "www.sci.gov.in"
 
   - id: high_courts_ecourts
-    name: "High Courts & eCourts Portal"
+    name: "eCourts Services & High Court Portals"
     base_url: "https://services.ecourts.gov.in"
-    authority: "High Courts of Indian States"
+    authority: "High Courts of Indian States & eCourts"
     priority: 2
     document_types:
-      - "High Court Rulings"
-      - "Writ Petitions"
-      - "Appellate Decisions"
+      - "Writ Petition Judgments"
+      - "Constitutional Validity Challenges"
     domains:
-      - "services.ecourts.gov.in"
       - "ecourts.gov.in"
+      - "services.ecourts.gov.in"
       - "allahabadhighcourt.in"
       - "bombayhighcourt.nic.in"
       - "delhihighcourt.nic.in"
@@ -106,14 +154,13 @@ official_sources:
       - "gujarathighcourt.nic.in"
 
   - id: state_gst_departments
-    name: "State Commercial Tax Portals"
+    name: "State Commercial Tax & AAR/AAAR Portals"
     base_url: "https://comtax.up.nic.in"
-    authority: "State Commercial Tax Departments"
-    priority: 3
+    authority: "State Commercial Tax Departments & AAR/AAAR"
+    priority: 2
     document_types:
-      - "SGST Notifications"
-      - "State Orders"
-      - "State AAR Rulings"
+      - "State AAR & Appellate AAR Rulings"
+      - "SGST Notifications & Orders"
     domains:
       - "comtax.up.nic.in"
       - "mahagst.gov.in"
@@ -124,133 +171,126 @@ official_sources:
       - "tgct.gov.in"
       - "rajasthantax.gov.in"
 
-  - id: icai_portal
-    name: "Institute of Chartered Accountants of India"
-    base_url: "https://www.icai.org"
+# Tier 2: Verified Unofficial & Institutional Reliable Sources (Fallback 1)
+verified_secondary_sources:
+  - id: icai_idtc
+    name: "ICAI GST & Indirect Taxes Committee"
+    base_url: "https://idtc.icai.org"
     authority: "ICAI - Indirect Taxes Committee"
-    priority: 2
+    priority: 1
     document_types:
-      - "Technical Guide on GST Annual Return & Audit"
-      - "GST Educational Series"
       - "Background Material on GST (BGM)"
-      - "Guidance Notes on Accounting & Reconciliation"
+      - "Annual Return (GSTR-9/9C) Technical Guides & Handbooks"
     domains:
-      - "www.icai.org"
+      - "idtc.icai.org"
       - "icai.org"
-
-  - id: icsi_portal
-    name: "Institute of Company Secretaries of India"
-    base_url: "https://www.icsi.edu"
-    authority: "ICSI - Corporate Laws & Secretarial Audit"
-    priority: 2
-    document_types:
-      - "Secretarial Audit GST Guidance"
-      - "Corporate Compliance Bulletins"
-    domains:
-      - "www.icsi.edu"
-      - "icsi.edu"
-
-  - id: indian_kanoon
-    name: "Indian Kanoon Legal Repository"
-    base_url: "https://indiankanoon.org"
-    authority: "Judicial Precedents Archive (Indian Kanoon)"
-    priority: 2
-    document_types:
-      - "Supreme Court GST Judgments"
-      - "High Court Writ Petitions & Rulings"
-      - "CESTAT Appellate Orders"
-    domains:
-      - "indiankanoon.org"
-
-  - id: cestat_tribunal
-    name: "Customs, Excise & Service Tax Appellate Tribunal"
-    base_url: "https://cestat.gov.in"
-    authority: "CESTAT Appellate Tribunal"
-    priority: 2
-    document_types:
-      - "Appellate Tribunal Orders"
-      - "Transitional Credit (Section 140) Jurisprudence"
-    domains:
-      - "cestat.gov.in"
-      - "cestatnew.nic.in"
+      - "www.icai.org"
 
   - id: taxmann_reporter
-    name: "Taxmann Tax Law Reporter"
+    name: "Taxmann"
     base_url: "https://www.taxmann.com"
-    authority: "Tax Law Reporter (Taxmann)"
-    priority: 3
+    authority: "Taxmann Research Database"
+    priority: 1
     document_types:
-      - "Goods & Services Tax Reports (GSTR)"
-      - "Case Law Digests & High Court Analyses"
-      - "Notification & Circular Commentaries"
+      - "Consolidated Amended Statutes"
+      - "Headnoted Judicial & AAR Rulings"
     domains:
-      - "www.taxmann.com"
       - "taxmann.com"
+      - "www.taxmann.com"
+
+  - id: taxsutra_reporter
+    name: "Taxsutra"
+    base_url: "https://www.taxsutra.com"
+    authority: "Taxsutra Indirect Tax Intelligence"
+    priority: 1
+    document_types:
+      - "High Court, Supreme Court & Tribunal Orders"
+      - "Litigation Trackers & Expert Columns"
+    domains:
+      - "taxsutra.com"
+      - "www.taxsutra.com"
+
+  - id: centax_reporter
+    name: "Centax Online"
+    base_url: "https://www.centaxonline.com"
+    authority: "Centax Indirect Tax Database"
+    priority: 2
+    document_types:
+      - "GST, Customs & Legacy Indirect Tax Jurisprudence"
+    domains:
+      - "centaxonline.com"
+      - "www.centaxonline.com"
 
   - id: livelaw_reporter
-    name: "LiveLaw Legal News"
+    name: "LiveLaw"
     base_url: "https://www.livelaw.in"
     authority: "Legal Case Reporter (LiveLaw)"
-    priority: 3
+    priority: 2
     document_types:
-      - "Supreme Court & High Court GST Case Reports"
-      - "Interim Stay Orders & Writ Petition Updates"
+      - "Live Court Hearings, Interim Stays & Tax Judgments"
     domains:
-      - "www.livelaw.in"
       - "livelaw.in"
+      - "www.livelaw.in"
 
   - id: barandbench_reporter
-    name: "Bar & Bench Legal Portal"
+    name: "Bar & Bench"
     base_url: "https://www.barandbench.com"
-    authority: "Legal News & Analysis (Bar & Bench)"
-    priority: 3
+    authority: "Legal Journalism Portal (Bar & Bench)"
+    priority: 2
     document_types:
-      - "High Court Tax Bench Reports"
-      - "GST Litigation Updates"
+      - "High Court & Supreme Court Tax Reports"
     domains:
-      - "www.barandbench.com"
       - "barandbench.com"
+      - "www.barandbench.com"
 
-  - id: taxguru_portal
-    name: "TaxGuru Tax & Law Portal"
-    base_url: "https://taxguru.in"
-    authority: "Tax Practice Portal (TaxGuru)"
-    priority: 4
+  - id: taxo_portal
+    name: "TAXO"
+    base_url: "https://taxo.online"
+    authority: "TAXO Practitioner Research Portal"
+    priority: 2
     document_types:
-      - "Practitioner Commentary"
-      - "Advance Ruling Digests"
-      - "Notification Summaries"
+      - "Notification Trackers & Case Summaries"
     domains:
-      - "www.taxguru.in"
-      - "taxguru.in"
+      - "taxo.online"
+      - "www.taxo.online"
 
   - id: cleartax_portal
-    name: "ClearTax GST Return Portal"
-    base_url: "https://cleartax.in"
-    authority: "Tax Return & Filing Portal (ClearTax)"
-    priority: 4
+    name: "ClearTax GST Law & Updates"
+    base_url: "https://cleartax.in/s/gst-law-and-updates"
+    authority: "ClearTax GST Compliance Portal"
+    priority: 3
     document_types:
-      - "GSTR Return Filing Walkthroughs"
-      - "Table Disclosures & Compliance Timelines"
+      - "Compliance Explainers & Rate Trackers"
     domains:
-      - "www.cleartax.in"
       - "cleartax.in"
+      - "www.cleartax.in"
+
+  - id: vinodkothari_portal
+    name: "Vinod Kothari Consultants"
+    base_url: "https://vinodkothari.com"
+    authority: "Vinod Kothari Analytical Articles"
+    priority: 3
+    document_types:
+      - "Deep-Dive Analytical Articles (Corporate Guarantees, Real Estate, Financial Services)"
+    domains:
+      - "vinodkothari.com"
+      - "www.vinodkothari.com"
+
+# Tier 3: Open-Web Fallback Policy (Fallback 2, controlled by ALLOW_UNVERIFIED_FALLBACK in .env)
+unverified_fallback_policy:
+  blocked_domains: []
 
 # Source Ranking Rules
 authority_hierarchy:
   - "Constitution of India"
   - "Supreme Court of India"
-  - "CGST / IGST / UTGST Act (Statutory Enactments)"
+  - "CGST / IGST / UTGST / SGST Acts (Statutory Enactments)"
   - "Jurisdictional High Court Judgments"
   - "Other High Courts Judgments"
+  - "GST Appellate Tribunal (GSTAT)"
   - "CGST / IGST Rules (Subordinate Legislation)"
-  - "Statutory Notifications (CBIC / Central Government)"
+  - "Statutory Notifications (CBIC / Central & State Governments)"
   - "CBIC Circulars / Instructions (Binding on Department)"
   - "Appellate Authority for Advance Rulings (AAAR)"
   - "Authority for Advance Rulings (AAR)"
-  - "Customs, Excise and Service Tax Appellate Tribunal (CESTAT)"
-  - "ICAI Technical Guides & Guidance Notes (Authoritative Accounting/CA Standards)"
-  - "GSTN Advisories (Procedural / Portal Operations)"
-  - "GST Council Recommendations (Non-statutory until notified)"
-  - "Authoritative Tax Law Reporters (Taxmann, Indian Kanoon, LiveLaw)"
-  - "Secondary Tax Commentary & Return Portals (TaxGuru, ClearTax)"
+  - "ICAI Indirect Taxes Committee Guidance"

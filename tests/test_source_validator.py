@@ -20,15 +20,35 @@ def test_invalid_scheme_rejected():
     assert "Unsupported scheme" in reason
 
 
-def test_non_allowlisted_domain_rejected():
+def test_non_allowlisted_domain_rejected_by_default():
     validator = SourceValidator(allowed_domains=["taxinformation.cbic.gov.in"], enforce_official=True)
     valid, reason = validator.validate_url("https://random-unverified-blog.com/gst-update")
     assert valid is False
-    assert "not in the approved official GST domain registry" in reason
+    assert "not in the approved GST domain registry" in reason
+
+
+def test_unverified_fallback_allows_public_non_blocked_domain_but_still_blocks_ssrf(monkeypatch):
+    validator = SourceValidator(
+        allowed_domains=["taxinformation.cbic.gov.in"],
+        enforce_official=True,
+        blocked_domains=["spamblog.example"],
+    )
+
+    monkeypatch.setattr("socket.getaddrinfo", lambda host, port: [(None, None, None, None, ("93.184.216.34", 443))])
+    ok, _ = validator.validate_url("https://good-tax-blog.example/gst-article", allow_unverified=True)
+    assert ok is True
+
+    blocked, blocked_reason = validator.validate_url("https://spamblog.example/post", allow_unverified=True)
+    assert blocked is False
+    assert "blocked domains" in blocked_reason
+
+    monkeypatch.setattr("socket.getaddrinfo", lambda host, port: [(None, None, None, None, ("127.0.0.1", 80))])
+    ssrf_ok, ssrf_reason = validator.validate_url("https://rebind-local.example/admin", allow_unverified=True)
+    assert ssrf_ok is False
+    assert "SSRF Protection" in ssrf_reason
 
 
 def test_allowlisted_domain_accepted(monkeypatch):
-    # Mock socket resolution so test does not depend on live internet DNS
     monkeypatch.setattr("socket.getaddrinfo", lambda host, port: [(None, None, None, None, ("164.100.1.1", 443))])
 
     validator = SourceValidator(allowed_domains=["cbic.gov.in", "tutorial.gst.gov.in"], enforce_official=True)
@@ -45,19 +65,16 @@ def test_obsolete_prototype_url_rejected():
 
 
 def test_sanitize_search_query():
-    # Test GSTIN redaction
     q1 = "Check Section 16 for taxpayer 27AABCU9603R1ZN in Maharashtra"
     s1 = sanitize_search_query(q1)
     assert "27AABCU9603R1ZN" not in s1
     assert "[REDACTED_GSTIN]" in s1
 
-    # Test PAN redaction
     q2 = "Notice issued to director ABCDE1234F under section 73"
     s2 = sanitize_search_query(q2)
     assert "ABCDE1234F" not in s2
     assert "[REDACTED_PAN]" in s2
 
-    # Test email & phone redaction
     q3 = "Contact client at ca_firm@example.com or 9876543210 regarding GSTR-3B"
     s3 = sanitize_search_query(q3)
     assert "ca_firm@example.com" not in s3

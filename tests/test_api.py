@@ -24,7 +24,7 @@ def test_api_health_endpoint(monkeypatch):
     assert "llm_status" in data
     assert "search_status" in data
     assert data["search_status"]["provider"] == settings.SEARCH_PROVIDER
-    assert "reachable" in data["search_status"]
+    assert "allow_unverified_fallback" in data["search_status"]
 
 
 def test_api_config_status_endpoint(monkeypatch):
@@ -39,7 +39,9 @@ def test_api_config_status_endpoint(monkeypatch):
     assert "llm_configured" in data
     assert "search_configured" in data
     assert data["search_provider"] == settings.SEARCH_PROVIDER
-    assert "search_reachable" in data
+    assert "official_domains_count" in data
+    assert "verified_secondary_domains_count" in data
+    assert "allow_unverified_fallback" in data
     assert data["data_dir_writable"] is True
 
 
@@ -55,13 +57,13 @@ def test_api_chat_endpoint_unconfigured_llm(monkeypatch):
     data = response.json()
     assert "research_id" in data
     assert "conversation_id" in data
-    assert "answer" in data
     assert "INFERENCE SETUP REQUIRED" in data["answer"]
+    assert "search_tiers_used" in data
+    assert "node_errors" in data
 
 
 def test_api_conversations_flow(monkeypatch):
     monkeypatch.setattr(llm_factory, "is_configured", lambda: False)
-    # 1. Post a query to generate conversation
     chat_resp = client.post(
         "/api/v1/chat",
         json={"query": "Test conversation query", "user_role": "Intern / Article Assistant"},
@@ -69,32 +71,21 @@ def test_api_conversations_flow(monkeypatch):
     assert chat_resp.status_code == 200
     conv_id = chat_resp.json()["conversation_id"]
 
-    # 2. List conversations
     list_resp = client.get("/api/v1/conversations")
     assert list_resp.status_code == 200
-    conversations = list_resp.json()
-    assert any(c["conversation_id"] == conv_id for c in conversations)
+    assert any(c["conversation_id"] == conv_id for c in list_resp.json())
 
-    # 3. Get single conversation
     detail_resp = client.get(f"/api/v1/conversations/{conv_id}")
     assert detail_resp.status_code == 200
-    messages = detail_resp.json()["messages"]
-    assert len(messages) >= 2  # user and assistant
+    assert len(detail_resp.json()["messages"]) >= 2
 
-    # 4. Delete conversation
     del_resp = client.delete(f"/api/v1/conversations/{conv_id}")
     assert del_resp.status_code == 200
 
 
-def test_api_document_upload():
-    test_pdf_content = b"%PDF-1.4 test dummy pdf content"
-    files = {"file": ("notice_sec73.pdf", test_pdf_content, "application/pdf")}
-    response = client.post("/api/v1/documents/upload", files=files)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["filename"] == "notice_sec73.pdf"
-    assert "sha256_hash" in data
-    assert len(data["sha256_hash"]) == 64
+def test_api_document_upload_removed():
+    response = client.post("/api/v1/documents/upload")
+    assert response.status_code == 404
 
 
 def test_api_chat_stream_endpoint(monkeypatch):
@@ -114,4 +105,4 @@ def test_api_chat_stream_endpoint(monkeypatch):
         assert len(events) >= 2
         assert events[0]["event"] == "started"
         event_types = [e["event"] for e in events]
-        assert "complete" in event_types or "step" in event_types
+        assert "complete" in event_types

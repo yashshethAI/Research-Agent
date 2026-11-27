@@ -65,8 +65,19 @@ class SearXNGSearchAdapter(BaseSearchProvider):
         if len(deduped) <= _DEFAULT_SINGLE_GROUP_LIMIT:
             groups = [deduped]
         else:
-            # Prefer canonical high-authority domains from sources.yaml when full allowlist is passed
-            if set(domains) == set(settings.allowed_domains):
+            # Prefer canonical high-authority domains from sources.yaml for the active tier pool
+            domain_set = set(domains)
+            if domain_set == set(settings.official_domains):
+                selected = settings.get_priority_search_domains(
+                    max_domains=_CHUNK_SIZE * _MAX_DOMAIN_GROUPS,
+                    section="official_sources",
+                )
+            elif domain_set == set(settings.verified_secondary_domains):
+                selected = settings.get_priority_search_domains(
+                    max_domains=_CHUNK_SIZE * _MAX_DOMAIN_GROUPS,
+                    section="verified_secondary_sources",
+                )
+            elif domain_set == set(settings.allowed_domains):
                 selected = settings.get_priority_search_domains(max_domains=_CHUNK_SIZE * _MAX_DOMAIN_GROUPS)
             else:
                 selected = deduped[: _CHUNK_SIZE * _MAX_DOMAIN_GROUPS]

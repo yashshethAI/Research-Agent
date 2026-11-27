@@ -63,7 +63,9 @@ def render_sidebar(
             st.write(f"**Base URL:** `{config_status.get('llm_base_url') or 'Not Set'}`")
             st.write(f"**Search Provider:** `{search_provider}`")
             st.write(f"**Search URL:** `{search_base_url or 'Not Set'}`")
-            st.write(f"**Allowed Domains:** {config_status.get('official_domains_count', 0)} official portals")
+            st.write(f"**Tier 1 Official Domains:** {config_status.get('official_domains_count', 0)}")
+            st.write(f"**Tier 2 Verified Secondary:** {config_status.get('verified_secondary_domains_count', 0)}")
+            st.write(f"**Tier 3 Open-Web Fallback:** {'Enabled' if config_status.get('allow_unverified_fallback') else 'Disabled'}")
             st.write("**Storage Engine:** Filesystem (Local)")
 
         st.divider()
