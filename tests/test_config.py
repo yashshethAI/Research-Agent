@@ -16,6 +16,7 @@ def test_settings_default_values():
     assert s.MIN_OFFICIAL_SOURCES_SUFFICIENT == 2
     assert s.MAX_EVIDENCE_SOURCES_FOR_LLM == 5
     assert s.ALLOW_UNVERIFIED_FALLBACK is False
+    assert s.SEARXNG_ENGINES == "bing,yahoo"
     assert s.SEARXNG_USE_SITE_OPERATORS is False
     assert s.MAX_SOURCE_SIZE_MB == 20
     assert s.MAX_SEARCH_RESULTS == 20

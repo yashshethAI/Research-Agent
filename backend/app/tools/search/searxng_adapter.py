@@ -210,7 +210,10 @@ class SearXNGSearchAdapter(BaseSearchProvider):
             url = (item.get("url") or "").strip()
             if not url:
                 continue
-            domain = urlparse(url).hostname or ""
+            domain = (urlparse(url).hostname or "").strip()
+            if not domain:
+                logger.debug(f"Skipping malformed SearXNG result URL without hostname: {url}")
+                continue
             raw_score = item.get("score")
             try:
                 score = float(raw_score) if raw_score is not None else 1.0

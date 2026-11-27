@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     SEARCH_PROVIDER: str = "searxng"
     SEARXNG_BASE_URL: str = "http://localhost:8080"
     SEARXNG_TIMEOUT: int = 30
-    SEARXNG_ENGINES: str | None = None
+    SEARXNG_ENGINES: str | None = "bing,yahoo"
     SEARXNG_USE_SITE_OPERATORS: bool = False
     MAX_SEARCH_RESULTS: int = 20
     MAX_FETCH_SOURCES: int = 8

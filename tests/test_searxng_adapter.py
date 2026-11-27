@@ -523,3 +523,33 @@ async def test_retrieve_evidence_early_stops_at_5_hits_and_cleans_tier_hints(mon
     assert search_queries_sent[0] == "when was GST introduced in India"
     assert "gov.in" not in search_queries_sent[0]
     assert len(out["evidence_records"]) == 5
+
+
+@pytest.mark.asyncio
+async def test_searxng_skips_malformed_urls_without_hostname(monkeypatch):
+    def handler(url, params, headers):
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Broken Brave Redirect",
+                        "url": "http:///go/v1/abc123",
+                        "content": "Broken redirect",
+                        "score": 9.0,
+                    },
+                    {
+                        "title": "Valid GST History",
+                        "url": "https://www.gst.gov.in/about/gst/history",
+                        "content": "GST history",
+                        "score": 5.0,
+                    },
+                ]
+            },
+        )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler, **kwargs))
+    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080", engines="bing,yahoo", use_site_operators=False)
+    results = await adapter.search("what is GST implemented India")
+    assert len(results) == 1
+    assert results[0].url == "https://www.gst.gov.in/about/gst/history"
