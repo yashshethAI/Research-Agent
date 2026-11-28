@@ -46,7 +46,10 @@ def render_sidebar(
         search_status_msg = config_status.get("search_status_message")
 
         if llm_ready:
-            st.success(f"🟢 LLM: {config_status.get('llm_model') or 'Configured'}", icon="✅")
+            st.success(f"🟢 Answer LLM: {config_status.get('llm_model') or 'Configured'}", icon="✅")
+            r_model = config_status.get("research_llm_model")
+            if r_model:
+                st.caption(f"Planner LLM: `{r_model}`")
         else:
             st.warning("🟠 LLM: Not Configured (OpenAI-compatible)", icon="⚠️")
 
@@ -60,7 +63,8 @@ def render_sidebar(
             st.success(f"🟢 Search: {search_provider.upper()} Ready", icon="🔍")
 
         with st.expander("🛠️ Connection Details", expanded=False):
-            st.write(f"**Base URL:** `{config_status.get('llm_base_url') or 'Not Set'}`")
+            st.write(f"**Answer LLM URL:** `{config_status.get('llm_base_url') or 'Not Set'}`")
+            st.write(f"**Research/Planner LLM URL:** `{config_status.get('research_llm_base_url') or 'Same as Answer LLM'}`")
             st.write(f"**Search Provider:** `{search_provider}`")
             st.write(f"**Search URL:** `{search_base_url or 'Not Set'}`")
             st.write(f"**Tier 1 Official Domains:** {config_status.get('official_domains_count', 0)}")

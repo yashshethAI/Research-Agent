@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     APP_PORT: int = 8000
     STREAMLIT_PORT: int = 8501
 
-    # OpenAI-Compatible Local/Cloud LLM
+    # OpenAI-Compatible Local/Cloud LLM (Answer Generation)
     LLM_PROVIDER: str = "openai_compatible"
     LLM_BASE_URL: str | None = None
     LLM_API_KEY: str | None = None
@@ -32,11 +32,22 @@ class Settings(BaseSettings):
     LLM_TIMEOUT: int = 180
     LLM_MAX_RETRIES: int = 2
 
+    # Optional Separate OpenAI-Compatible LLM for Query Understanding (falls back to LLM_* if unset)
+    RESEARCH_LLM_BASE_URL: str | None = None
+    RESEARCH_LLM_API_KEY: str | None = None
+    RESEARCH_LLM_BASIC_AUTH_USERNAME: str | None = None
+    RESEARCH_LLM_BASIC_AUTH_PASSWORD: str | None = None
+    RESEARCH_LLM_MODEL: str | None = None
+    RESEARCH_LLM_TEMPERATURE: float | None = None
+    RESEARCH_LLM_TIMEOUT: int | None = None
+    RESEARCH_LLM_MAX_RETRIES: int | None = None
+
     # Web Search (Local-First SearXNG)
     SEARCH_PROVIDER: str = "searxng"
     SEARXNG_BASE_URL: str = "http://localhost:8080"
     SEARXNG_TIMEOUT: int = 30
-    SEARXNG_ENGINES: str | None = None
+    SEARXNG_ENGINES: str | None = "bing,yahoo"
+    SEARXNG_USE_SITE_OPERATORS: bool = False
     MAX_SEARCH_RESULTS: int = 20
     MAX_FETCH_SOURCES: int = 8
     MAX_RESEARCH_RETRIES: int = 2

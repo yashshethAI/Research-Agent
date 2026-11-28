@@ -8,8 +8,15 @@ from backend.app.agents.state import ResearchState
 from backend.app.core.config import settings
 from backend.app.tools.fetcher import FetchedDocument, safe_fetcher
 from backend.app.tools.search.base import SearchNotConfiguredError, SearchResult
-from backend.app.tools.search.searxng_adapter import SearXNGSearchAdapter
+from backend.app.tools.search.searxng_adapter import SearXNGSearchAdapter, _result_cache
 from backend.app.tools.source_validator import source_validator
+
+
+@pytest.fixture(autouse=True)
+def _clear_searxng_cache():
+    _result_cache.clear()
+    yield
+    _result_cache.clear()
 
 
 class _FakeAsyncClient:
@@ -89,7 +96,7 @@ async def test_searxng_search_parses_results_and_sanitizes_pii(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_searxng_injects_site_clauses_when_missing(monkeypatch):
+async def test_searxng_injects_site_clauses_when_enabled(monkeypatch):
     captured_queries: list[str] = []
 
     def handler(url, params, headers):
@@ -98,7 +105,7 @@ async def test_searxng_injects_site_clauses_when_missing(monkeypatch):
 
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler, **kwargs))
 
-    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080")
+    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080", use_site_operators=True)
     await adapter.search(
         query="Section 16(4) judgment",
         domains=["sci.gov.in", "www.sci.gov.in", "gstat.gov.in"],
@@ -109,6 +116,26 @@ async def test_searxng_injects_site_clauses_when_missing(monkeypatch):
     q = captured_queries[0]
     assert "(site:sci.gov.in OR site:gstat.gov.in)" in q
     assert "www.sci.gov.in" not in q
+
+
+@pytest.mark.asyncio
+async def test_searxng_skips_site_clauses_by_default(monkeypatch):
+    captured_queries: list[str] = []
+
+    def handler(url, params, headers):
+        captured_queries.append(params["q"])
+        return httpx.Response(200, json={"results": []})
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler, **kwargs))
+
+    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080", use_site_operators=False)
+    await adapter.search(
+        query="GSTR-9C due date FY 2025-26",
+        domains=settings.official_domains,
+    )
+
+    assert captured_queries == ["GSTR-9C due date FY 2025-26"]
+    assert "site:" not in captured_queries[0]
 
 
 @pytest.mark.asyncio
@@ -153,7 +180,7 @@ async def test_searxng_chunks_tier1_domains_and_deduplicates(monkeypatch):
 
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler, **kwargs))
 
-    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080")
+    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080", use_site_operators=True)
     results = await adapter.search(query="ITC judgment", domains=settings.official_domains, max_results=10)
 
     assert len(captured_queries) == 2
@@ -161,6 +188,67 @@ async def test_searxng_chunks_tier1_domains_and_deduplicates(monkeypatch):
     assert results[0].url == "https://taxinformation.cbic.gov.in/sec16"
     assert results[0].score == 5.0
     assert results[1].url == "https://www.indiacode.nic.in/handle/cgst"
+
+
+@pytest.mark.asyncio
+async def test_searxng_sequential_chunk_skips_group2_when_group1_has_5_hits(monkeypatch):
+    captured_queries: list[str] = []
+
+    def handler(url, params, headers):
+        captured_queries.append(params["q"])
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": f"Doc {i}",
+                        "url": f"https://taxinformation.cbic.gov.in/doc-{i}",
+                        "content": "Statutory text",
+                        "score": float(i),
+                    }
+                    for i in range(1, 6)
+                ]
+            },
+        )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler, **kwargs))
+
+    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080", use_site_operators=True)
+    results = await adapter.search(query="ITC judgment", domains=settings.official_domains, max_results=10)
+
+    assert len(captured_queries) == 1
+    assert len(results) == 5
+
+
+@pytest.mark.asyncio
+async def test_searxng_ttl_cache_deduplicates_identical_queries(monkeypatch):
+    call_count = 0
+
+    def handler(url, params, headers):
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "CBIC Notice",
+                        "url": "https://www.cbic.gov.in/notice.pdf",
+                        "content": "Due date extension",
+                        "score": 5.0,
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler, **kwargs))
+    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080", use_site_operators=False)
+
+    res1 = await adapter.search("GSTR-9C due date", time_range="year")
+    res2 = await adapter.search("GSTR-9C due date", time_range="year")
+    assert call_count == 1
+    assert len(res1) == 1 and len(res2) == 1
+    assert res1[0].url == res2[0].url
 
 
 @pytest.mark.asyncio
@@ -315,3 +403,153 @@ async def test_retrieve_evidence_escalates_tier1_to_tier2_and_tier3(monkeypatch)
     monkeypatch.setattr(settings, "ALLOW_UNVERIFIED_FALLBACK", False)
     out2_disabled = await retrieve_evidence_node(state2)
     assert out2_disabled["should_refine_search"] is False
+
+
+@pytest.mark.asyncio
+async def test_searxng_detects_unresponsive_rate_limit_engines(monkeypatch):
+    def handler_rate_limited(url, params, headers):
+        return httpx.Response(
+            200,
+            json={
+                "results": [],
+                "unresponsive_engines": [["duckduckgo", "CAPTCHA"], ["google cse", "Suspended: too many requests"]],
+            },
+        )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler_rate_limited, **kwargs))
+    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080")
+    with pytest.raises(RuntimeError, match="blocked/rate-limited"):
+        await adapter.search("corporate guarantee GST")
+
+    # Verify retrieve_evidence records SearchEngineRateLimitError cleanly in node_errors and halts pointless tier loop
+    monkeypatch.setattr(settings, "SEARCH_PROVIDER", "searxng")
+    monkeypatch.setattr(settings, "SEARXNG_BASE_URL", "http://localhost:8080")
+    state = ResearchState(query="corporate guarantee GST", search_queries=["corporate guarantee rule 28(2)"], search_tier="official")
+    out = await retrieve_evidence_node(state)
+    assert out["should_refine_search"] is False
+    assert any(err["error_type"] == "SearchEngineRateLimitError" for err in out["node_errors"])
+
+
+@pytest.mark.asyncio
+async def test_retrieve_evidence_reuses_pool_on_tier_escalation(monkeypatch):
+    """Verify Tier 2 escalation promotes pre-discovered Tier 2 URLs from state.search_results."""
+    monkeypatch.setattr(settings, "SEARCH_PROVIDER", "searxng")
+    monkeypatch.setattr(settings, "SEARXNG_BASE_URL", "http://localhost:8080")
+    search_calls: list[str] = []
+
+    async def mock_search(self, query, domains=None, max_results=10, time_range=None):
+        search_calls.append(query)
+        return []
+
+    async def mock_fetch(url: str, allow_unverified: bool = False):
+        return FetchedDocument(
+            url=url,
+            content=b"<html><body><h1>Rule 28(2) Corporate Guarantee</h1><p>Taxmann analysis of Rule 28(2) CGST Rules and Circular 225/19/2024-GST.</p></body></html>",
+            content_type="text/html",
+            status_code=200,
+            sha256_hash="poolhash123",
+            file_path="",
+        )
+
+    monkeypatch.setattr(SearXNGSearchAdapter, "search", mock_search)
+    monkeypatch.setattr(source_validator, "validate_url", lambda url, allow_unverified=False: (True, "ok"))
+    monkeypatch.setattr(safe_fetcher, "fetch", mock_fetch)
+
+    # Simulate Tier 1 already stored a Tier 2 Taxmann URL in state.search_results
+    state = ResearchState(
+        query="Corporate guarantee Rule 28(2)",
+        search_queries=["corporate guarantee rule 28(2)"],
+        search_tier="verified_secondary",
+        retry_count=1,
+        search_results=[
+            {
+                "title": "Taxmann Rule 28(2) Analysis",
+                "url": "https://www.taxmann.com/post/rule-28-2-corporate-guarantee",
+                "snippet": "Rule 28(2) valuation analysis",
+                "domain": "www.taxmann.com",
+                "score": 6.0,
+                "source_tier": "verified_secondary",
+            }
+        ],
+    )
+    out = await retrieve_evidence_node(state)
+    assert len(out["evidence_records"]) >= 1
+    assert any("taxmann.com" in r["url"] for r in out["evidence_records"])
+
+
+@pytest.mark.asyncio
+async def test_retrieve_evidence_early_stops_at_5_hits_and_cleans_tier_hints(monkeypatch):
+    """Verify retrieve_evidence skips query 1 once query 0 yields >=5 hits and avoids noisy gov.in suffix."""
+    monkeypatch.setattr(settings, "SEARCH_PROVIDER", "searxng")
+    monkeypatch.setattr(settings, "SEARXNG_BASE_URL", "http://localhost:8080")
+    monkeypatch.setattr(settings, "SEARXNG_USE_SITE_OPERATORS", False)
+    search_queries_sent: list[str] = []
+
+    async def mock_search(self, query, domains=None, max_results=10, time_range=None):
+        search_queries_sent.append(query)
+        return [
+            SearchResult(
+                title=f"GST Doc {i}",
+                url=f"https://www.cbic.gov.in/doc-{i}.pdf",
+                snippet="GST effective date 1 July 2017",
+                domain="www.cbic.gov.in",
+                score=float(10 - i),
+            )
+            for i in range(5)
+        ]
+
+    async def mock_fetch(url: str, allow_unverified: bool = False):
+        return FetchedDocument(
+            url=url,
+            content=b"<html><body><h1>GST Introduction</h1><p>Goods and Services Tax was implemented in India on 1 July 2017 under the Constitution 101st Amendment Act.</p></body></html>",
+            content_type="text/html",
+            status_code=200,
+            sha256_hash="earlystophash",
+            file_path="",
+        )
+
+    monkeypatch.setattr(SearXNGSearchAdapter, "search", mock_search)
+    monkeypatch.setattr(source_validator, "validate_url", lambda url, allow_unverified=False: (True, "ok"))
+    monkeypatch.setattr(safe_fetcher, "fetch", mock_fetch)
+
+    state = ResearchState(
+        query="when was GST introduced in India",
+        search_queries=["when was GST introduced in India", "GST rollout date 1 July 2017"],
+        search_tier="official",
+    )
+    out = await retrieve_evidence_node(state)
+
+    assert len(search_queries_sent) == 1
+    assert search_queries_sent[0] == "when was GST introduced in India"
+    assert "gov.in" not in search_queries_sent[0]
+    assert len(out["evidence_records"]) == 5
+
+
+@pytest.mark.asyncio
+async def test_searxng_skips_malformed_urls_without_hostname(monkeypatch):
+    def handler(url, params, headers):
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Broken Brave Redirect",
+                        "url": "http:///go/v1/abc123",
+                        "content": "Broken redirect",
+                        "score": 9.0,
+                    },
+                    {
+                        "title": "Valid GST History",
+                        "url": "https://www.gst.gov.in/about/gst/history",
+                        "content": "GST history",
+                        "score": 5.0,
+                    },
+                ]
+            },
+        )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler, **kwargs))
+    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080", engines="bing,yahoo", use_site_operators=False)
+    results = await adapter.search("what is GST implemented India")
+    assert len(results) == 1
+    assert results[0].url == "https://www.gst.gov.in/about/gst/history"

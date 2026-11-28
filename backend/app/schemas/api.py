@@ -35,6 +35,8 @@ class ConfigStatusResponse(BaseModel):
     llm_configured: bool
     llm_base_url: str | None = None
     llm_model: str | None = None
+    research_llm_base_url: str | None = None
+    research_llm_model: str | None = None
     search_configured: bool
     search_provider: str
     search_reachable: bool = False
@@ -43,6 +45,7 @@ class ConfigStatusResponse(BaseModel):
     official_domains_count: int
     verified_secondary_domains_count: int = 0
     allow_unverified_fallback: bool = False
+    search_use_site_operators: bool = False
     data_dir_writable: bool
 
 

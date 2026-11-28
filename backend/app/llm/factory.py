@@ -22,22 +22,36 @@ class LLMFactory:
     """Configurable factory for OpenAI-compatible local/remote LLM endpoints.
 
     Supports vLLM, Ollama, llama.cpp, DeepInfra, and any OpenAI-compatible server.
-    Supports standard Bearer authentication and HTTP Basic authentication (for ngrok tunnels).
+    Supports Bearer authentication, HTTP Basic authentication, and optional RESEARCH_LLM_* overrides.
     """
 
-    def __init__(self, override_settings: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        override_settings: dict[str, Any] | None = None,
+        use_research_settings: bool = False,
+    ):
         self.settings = override_settings or {}
+        self.use_research_settings = use_research_settings
+
+    def _get_setting(self, key: str, default: Any = None) -> Any:
+        if key in self.settings:
+            return self.settings[key]
+        if self.use_research_settings:
+            research_val = getattr(settings, f"RESEARCH_{key}", None)
+            if isinstance(research_val, str):
+                if research_val.strip():
+                    return research_val
+            elif research_val is not None:
+                return research_val
+        return getattr(settings, key, default)
 
     @property
     def raw_base_url(self) -> str | None:
-        if "LLM_BASE_URL" in self.settings:
-            return self.settings["LLM_BASE_URL"]
-        return settings.LLM_BASE_URL
+        return self._get_setting("LLM_BASE_URL")
 
     @property
     def basic_auth_credentials(self) -> tuple[str | None, str | None]:
-        """Resolves basic auth username and password from settings or embedded in URL."""
-        # 1. Check URL embedded credentials first (e.g. https://user:pass@host/v1)
+        """Resolves basic auth username and password from URL or settings."""
         raw = self.raw_base_url
         if raw and "@" in raw:
             try:
@@ -47,13 +61,12 @@ class LLMFactory:
             except Exception:
                 pass
 
-        # 2. Check explicit settings
         if "LLM_BASE_URL" in self.settings:
             user = self.settings.get("LLM_BASIC_AUTH_USERNAME")
             pwd = self.settings.get("LLM_BASIC_AUTH_PASSWORD")
         else:
-            user = self.settings.get("LLM_BASIC_AUTH_USERNAME", settings.LLM_BASIC_AUTH_USERNAME)
-            pwd = self.settings.get("LLM_BASIC_AUTH_PASSWORD", settings.LLM_BASIC_AUTH_PASSWORD)
+            user = self._get_setting("LLM_BASIC_AUTH_USERNAME")
+            pwd = self._get_setting("LLM_BASIC_AUTH_PASSWORD")
 
         if user and pwd:
             return user.strip(), pwd.strip()
@@ -71,7 +84,6 @@ class LLMFactory:
             try:
                 parsed = urlparse(raw)
                 if parsed.username:
-                    # Strip user:pass from netloc
                     host_part = parsed.hostname or ""
                     if parsed.port:
                         host_part = f"{host_part}:{parsed.port}"
@@ -84,25 +96,28 @@ class LLMFactory:
 
     @property
     def api_key(self) -> str:
-        key = self.settings.get("LLM_API_KEY", settings.LLM_API_KEY)
+        key = self._get_setting("LLM_API_KEY")
         return key if key and key.strip() else "none"
 
     @property
     def model_name(self) -> str:
-        model = self.settings.get("LLM_MODEL", settings.LLM_MODEL)
+        model = self._get_setting("LLM_MODEL")
         return model if model and model.strip() else "default"
 
     @property
     def temperature(self) -> float:
-        return float(self.settings.get("LLM_TEMPERATURE") or settings.LLM_TEMPERATURE)
+        val = self._get_setting("LLM_TEMPERATURE", 0.0)
+        return float(val if val is not None else settings.LLM_TEMPERATURE)
 
     @property
     def timeout(self) -> int:
-        return int(self.settings.get("LLM_TIMEOUT") or settings.LLM_TIMEOUT)
+        val = self._get_setting("LLM_TIMEOUT", 180)
+        return int(val if val is not None else settings.LLM_TIMEOUT)
 
     @property
     def max_retries(self) -> int:
-        return int(self.settings.get("LLM_MAX_RETRIES") or settings.LLM_MAX_RETRIES)
+        val = self._get_setting("LLM_MAX_RETRIES", 2)
+        return int(val if val is not None else settings.LLM_MAX_RETRIES)
 
     def is_configured(self) -> bool:
         """Returns True if an LLM base URL is present."""
@@ -135,7 +150,7 @@ class LLMFactory:
 
             async with httpx.AsyncClient(timeout=4.0) as client:
                 resp = await client.get(url, headers=headers)
-                if resp.status_code in (200, 404):  # 200 is standard /models, 404 means endpoint is active
+                if resp.status_code in (200, 404):
                     return True, f"LLM endpoint reachable. Model: {self.model_name}"
                 return False, f"LLM endpoint responded with HTTP {resp.status_code}"
         except Exception as e:
@@ -167,5 +182,6 @@ class LLMFactory:
         return ChatOpenAI(**kwargs)
 
 
-# Global factory instance
+# Global factory instances
 llm_factory = LLMFactory()
+research_llm_factory = LLMFactory(use_research_settings=True)

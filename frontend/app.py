@@ -63,7 +63,11 @@ def refresh_backend_data():
     st.session_state.conversations = api_client.list_conversations()
 
 
-if "config_status" not in st.session_state or "conversations" not in st.session_state:
+if (
+    "config_status" not in st.session_state
+    or not st.session_state.config_status.get("llm_configured")
+    or "conversations" not in st.session_state
+):
     refresh_backend_data()
 
 

@@ -32,6 +32,36 @@ def test_html_parser_removes_scripts_and_extracts_content():
     assert parsed["table_count"] == 1
 
 
+def test_html_parser_trafilatura_strips_boilerplate():
+    long_article = (
+        "<p>Under Section 16(5) of the Central Goods and Services Tax Act, 2017, "
+        "inserted retrospectively with effect from 1st July 2017 via the Finance (No. 2) Act, 2024, "
+        "registered persons are entitled to claim input tax credit for invoices pertaining to "
+        "FY 2017-18, FY 2018-19, FY 2019-20, and FY 2020-21 in any return filed up to 30th November 2021.</p>"
+        "<p>CBIC Circular No. 237/31/2024-GST further clarifies the procedure for rectification of orders.</p>"
+    )
+    raw_html = f"""
+    <html>
+        <head><title>CBIC Circular 237/31/2024-GST</title></head>
+        <body>
+            <header>Skip to Main Content | Screen Reader Access | Dark Theme</header>
+            <nav>Home | Acts | Rules | Circulars | Notifications | Contact Us</nav>
+            <main>
+                <article>
+                    <h1>Clarification on Section 16(5) CGST Act</h1>
+                    {long_article}
+                </article>
+            </main>
+            <footer>Copyright 2026 CBIC. All Rights Reserved. Privacy Policy | Terms of Use</footer>
+        </body>
+    </html>
+    """
+    parsed = HTMLParser.parse_html(raw_html, base_url="https://taxinformation.cbic.gov.in/circular-237")
+    assert "Section 16(5)" in parsed["text"]
+    assert "30th November 2021" in parsed["text"]
+    assert "Skip to Main Content" not in parsed["text"]
+
+
 def test_pdf_parser_with_in_memory_pdf():
     # Create an in-memory PDF using pymupdf
     doc = pymupdf.open()

@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
 _SRC_REF_RE = re.compile(r"^(?:#|https?://)?(SRC-\d{3})$", re.IGNORECASE)
+_BARE_SRC_GROUP_RE = re.compile(r"(?<!\[)\[(SRC-\d{3}(?:\s*,\s*SRC-\d{3})*)\](?!\()", re.IGNORECASE)
+_PAREN_SRC_GROUP_RE = re.compile(r"(?<!\])\((SRC-\d{3}(?:\s*,\s*SRC-\d{3})*)\)", re.IGNORECASE)
 _NOTIF_CITE_RE = re.compile(r"Notification\s+No\.?\s*(\d+/\d{4})", re.IGNORECASE)
 _CIRC_CITE_RE = re.compile(r"Circular\s+No\.?\s*(\d+/\d+/\d{4})", re.IGNORECASE)
 
@@ -37,6 +39,23 @@ async def validate_citations_node(state: ResearchState) -> dict[str, Any]:
         evidence_records = state.evidence_records or []
         report = state.final_report or ""
 
+        if not evidence_records:
+            dur = int((time.perf_counter() - t0) * 1000)
+            trace.append(make_trace_entry("validate_citations", state.search_tier, "no_evidence", dur))
+            return {
+                "current_step": "validate_citations",
+                "citation_validation": {
+                    "verified_citations": [],
+                    "unverified_claims": [],
+                    "source_count": 0,
+                    "tiers_used": state.attempted_tiers,
+                    "links_resolved": 0,
+                    "links_stripped": 0,
+                    "validation_status": "No Evidence Retrieved",
+                },
+                "execution_trace": trace,
+            }
+
         by_id: dict[str, dict[str, Any]] = {
             (e.get("source_id") or "").upper(): e for e in evidence_records if e.get("source_id")
         }
@@ -53,7 +72,23 @@ async def validate_citations_node(state: ResearchState) -> dict[str, Any]:
         links_resolved = 0
         links_stripped = 0
 
-        def _audit_link(match: re.Match[str]) -> str:
+        def _resolve_src_list(raw_group: str) -> str:
+            nonlocal links_resolved, links_stripped
+            parts: list[str] = []
+            for token in raw_group.split(","):
+                src_id = token.strip().upper()
+                rec = by_id.get(src_id)
+                if rec and rec.get("url"):
+                    links_resolved += 1
+                    parts.append(f"[{src_id}]({rec['url']})")
+                else:
+                    links_stripped += 1
+                    unverified_claims.append(f"Unresolved source reference: {src_id}")
+                    parts.append(f"{src_id} *(unverified)*")
+            return ", ".join(parts)
+
+        # Pass 1: Resolve [Label](SRC-XXX) and strip fabricated external URLs
+        def _audit_md_link(match: re.Match[str]) -> str:
             nonlocal links_resolved, links_stripped
             label = match.group(1)
             target = match.group(2).strip()
@@ -80,7 +115,19 @@ async def validate_citations_node(state: ResearchState) -> dict[str, Any]:
             unverified_claims.append(f"Removed ungrounded link URL: {target}")
             return f"{label} *(link unverified)*"
 
-        audited_report = _MD_LINK_RE.sub(_audit_link, report)
+        audited_report = _MD_LINK_RE.sub(_audit_md_link, report)
+
+        # Pass 2: Convert bare [SRC-008] / [SRC-003, SRC-007] into clickable links
+        audited_report = _BARE_SRC_GROUP_RE.sub(
+            lambda m: _resolve_src_list(m.group(1)),
+            audited_report,
+        )
+
+        # Pass 3: Convert parenthetical (SRC-002) / (SRC-002, SRC-004) into clickable links
+        audited_report = _PAREN_SRC_GROUP_RE.sub(
+            lambda m: f"({_resolve_src_list(m.group(1))})",
+            audited_report,
+        )
 
         # Dynamically check cited Notification & Circular numbers against retrieved evidence corpus
         for num in dict.fromkeys(_NOTIF_CITE_RE.findall(audited_report)):

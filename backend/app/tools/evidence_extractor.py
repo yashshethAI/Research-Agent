@@ -133,9 +133,33 @@ def rerank_search_results(
     return [item[1] for item in scored]
 
 
+_GENERIC_QUERY_WORDS = _STOPWORDS | {
+    "latest", "recent", "update", "updates", "amendment", "amendments", "new",
+    "current", "rule", "rules", "section", "act", "cgst", "igst", "sgst", "utgst",
+    "india", "indian", "law", "position", "legal", "scheme", "2017", "2024", "2025", "2026",
+}
+
+_PORTAL_CHROME_RE = re.compile(
+    r"(?:skip to main content|screen reader|light theme|dark theme|useful links|"
+    r"contact gst council|page last updated on|all rights reserved|###\s*(?:archives|rti|faqs|useful links))",
+    re.IGNORECASE,
+)
+
+
+def _strip_portal_chrome(text: str) -> str:
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    kept = [
+        ln for ln in lines
+        if not _PORTAL_CHROME_RE.search(ln)
+        and not re.match(r"^(?:english|hindi|rti|faqs|address\s*:|phone\s*:|e-?mail\s*:)", ln, re.IGNORECASE)
+    ]
+    return "\n".join(kept).strip()
+
+
 def detect_spa_shell(html_text: str, extracted_text: str) -> bool:
-    """Detects JS-rendered SPA shells or empty placeholder pages lacking real statutory content."""
-    text_len = len((extracted_text or "").strip())
+    """Detects JS-rendered SPA shells or boilerplate-only portal pages lacking substantive content."""
+    clean_body = _strip_portal_chrome(extracted_text or "")
+    text_len = len(clean_body)
     if text_len >= 250:
         return False
 
@@ -314,7 +338,7 @@ def compile_relevant_evidence(
     research_plan: dict[str, Any] | None = None,
     tier: str = "official",
     start_index: int = 1,
-    max_excerpt_chars: int = 1500,
+    max_excerpt_chars: int = 2200,
 ) -> list[dict[str, Any]]:
     """Compiles structured, query-relevant evidence records with truthful tier & verification flags."""
     plan = research_plan or {}
@@ -388,13 +412,17 @@ def is_evidence_sufficient(
         *(plan.get("target_rules") or []),
     ]
     keywords, citations = _extract_query_keywords(query, target_terms)
+    specific_keywords = [kw for kw in keywords if kw not in _GENERIC_QUERY_WORDS] or keywords
+    query_wants_customs = any(k in (query or "").lower() for k in ("customs", "sez", "icegate", "dgft", "import", "export"))
 
     relevant_count = 0
     for rec in usable:
         text_l = f"{rec.get('title', '')} {rec.get('excerpt', '')}".lower()
-        kw_matches = sum(1 for kw in keywords if kw in text_l)
+        if not query_wants_customs and "customs act" in text_l and "cgst" not in text_l and "igst" not in text_l:
+            continue
+        kw_matches = sum(1 for kw in specific_keywords if kw in text_l)
         cit_matches = sum(1 for cit in citations if cit in text_l)
-        if cit_matches >= 1 or kw_matches >= min(2, max(1, len(keywords))):
+        if cit_matches >= 1 or kw_matches >= min(2, max(1, len(specific_keywords))):
             relevant_count += 1
 
     if relevant_count >= threshold:

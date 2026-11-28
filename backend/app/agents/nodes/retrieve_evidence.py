@@ -23,12 +23,22 @@ from backend.app.tools.evidence_extractor import (
 from backend.app.tools.fetcher import safe_fetcher
 from backend.app.tools.html_parser import HTMLParser
 from backend.app.tools.pdf_parser import PDFParser
-from backend.app.tools.search.base import SearchNotConfiguredError, SearchResult
+from backend.app.tools.search.base import (
+    SearchEngineRateLimitError,
+    SearchNotConfiguredError,
+    SearchResult,
+)
 from backend.app.tools.search.mock_adapter import MockSearchAdapter
 from backend.app.tools.search.searxng_adapter import SearXNGSearchAdapter
 from backend.app.tools.source_validator import source_validator
 
 logger = logging.getLogger(__name__)
+
+# Natural-language tier hints appended when site: operators are disabled
+_TIER_HINTS: dict[str, str] = {
+    "official": "CBIC",
+    "verified_secondary": "Taxmann ICAI",
+}
 
 
 def _next_search_tier(current_tier: str) -> str | None:
@@ -48,6 +58,51 @@ def _broaden_queries(queries: list[str]) -> list[str]:
     return normalize_llm_search_queries(broadened, max_queries=4)
 
 
+def _add_tier_hint(query: str, tier: str) -> str:
+    """Appends a light tier hint when site: operators are disabled and query lacks domain cues."""
+    if settings.SEARXNG_USE_SITE_OPERATORS:
+        return query
+    q_l = query.lower()
+    if tier == "official":
+        if "cbic" in q_l or "gst" in q_l or "cgst" in q_l or "igst" in q_l:
+            return query
+        return f"{query} CBIC"
+    hint = _TIER_HINTS.get(tier)
+    if hint and hint.lower() not in q_l:
+        return f"{query} {hint}"
+    return query
+
+
+def _promote_from_pool(
+    existing_results: list[dict[str, Any]],
+    target_tier: str,
+    seen_urls: set[str],
+) -> list[SearchResult]:
+    """Promotes already-fetched URLs matching target_tier from the unfiltered result pool.
+
+    This avoids re-querying SearXNG when escalating tiers, since earlier searches
+    may have discovered Tier 2/3 URLs that were not needed at that time.
+    """
+    promoted: list[SearchResult] = []
+    for r in existing_results:
+        url = r.get("url", "")
+        if url in seen_urls:
+            continue
+        stored_tier = r.get("source_tier", "")
+        if stored_tier == target_tier:
+            promoted.append(
+                SearchResult(
+                    title=r.get("title", url),
+                    url=url,
+                    snippet=r.get("snippet", ""),
+                    domain=r.get("domain", ""),
+                    score=float(r.get("score", 1.0)),
+                )
+            )
+            seen_urls.add(url)
+    return promoted
+
+
 async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
     """Node 2: Executes one tier pass (search -> rerank -> fetch -> parse -> relevant passage compile)."""
     t0 = time.perf_counter()
@@ -65,9 +120,13 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
         if state.llm_unconfigured_guidance or state.needs_clarification:
             return {"current_step": "retrieve_evidence"}
 
-        queries = normalize_llm_search_queries(state.search_queries, max_queries=4)
+        queries = normalize_llm_search_queries(state.search_queries, max_queries=3)
         if not queries:
             queries = normalize_llm_search_queries([state.query], max_queries=2)
+
+        # Cap to 2 focused queries on first pass
+        if state.retry_count == 0 and len(queries) > 2:
+            queries = queries[:2]
 
         allow_unverified = active_tier == "unverified_fallback"
         target_domains = settings.get_tier_domains(active_tier, max_domains=12)
@@ -101,14 +160,31 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
                 "node_errors": errors,
             }
 
-        # 2. Search across queries in active tier
-        raw_hits: list[SearchResult] = []
-        seen_urls: set[str] = {r.get("url", "") for r in state.search_results}
+        # 2. Try promoting from result pool before querying SearXNG
+        already_fetched_urls: set[str] = {e.get("url", "") for e in state.evidence_records if e.get("url")}
+        pool_hits = _promote_from_pool(state.search_results, active_tier, already_fetched_urls)
+        seen_urls: set[str] = already_fetched_urls | {r.get("url", "") for r in state.search_results if r.get("url")}
 
-        for q in queries:
+        # 3. Search across queries in active tier
+        raw_hits: list[SearchResult] = list(pool_hits)
+        rate_limited = False
+        early_stop_threshold = 5
+
+        for idx, q in enumerate(queries):
+            # Early stop: if we already have enough unfiltered hits, skip remaining queries
+            if len(raw_hits) >= early_stop_threshold:
+                logger.info(f"Early stop: {len(raw_hits)} hits already, skipping remaining queries")
+                break
+
+            if idx > 0 and settings.SEARCH_PROVIDER == "searxng":
+                await asyncio.sleep(0.6)
+
+            # Add tier hint when site: operators are disabled
+            hinted_query = _add_tier_hint(q, active_tier)
+
             try:
                 results = await adapter.search(
-                    query=q,
+                    query=hinted_query,
                     domains=target_domains,
                     max_results=settings.MAX_SEARCH_RESULTS,
                     time_range=state.search_time_range,
@@ -134,19 +210,30 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
                     "execution_trace": trace,
                     "node_errors": errors,
                 }
+            except SearchEngineRateLimitError as e:
+                logger.warning(f"Search engine rate limit for '{q}': {e}")
+                errors.append(make_node_error("retrieve_evidence", "search", e, q))
+                rate_limited = True
+                break
             except Exception as e:
                 logger.error(f"Search failed for query '{q}': {e}")
                 errors.append(make_node_error("retrieve_evidence", "search", e, q))
 
-        # 3. Rerank hits across queries before selecting top fetch slots
+        # 4. Rerank hits across queries before selecting top fetch slots
         effective_query = (state.extracted_facts or {}).get("effective_query") or state.query
         target_terms = (state.research_plan or {}).get("target_sections") or []
         ranked_hits = rerank_search_results(raw_hits, query=effective_query, target_terms=target_terms)
 
-        tier_search_results = [{**r.model_dump(), "source_tier": active_tier} for r in ranked_hits]
+        # Store ALL unfiltered results with real tier from domain authority for pool reuse
+        existing_pool_urls = {r.get("url", "") for r in state.search_results if r.get("url")}
+        tier_search_results: list[dict[str, Any]] = []
+        for r in ranked_hits:
+            if r.url not in existing_pool_urls:
+                real_tier, _, _ = settings.get_domain_authority_info(r.domain or "")
+                tier_search_results.append({**r.model_dump(), "source_tier": real_tier})
         all_search_results = [*state.search_results, *tier_search_results]
 
-        # 4. Parallel fetch top candidates
+        # 5. Parallel fetch top candidates
         max_fetch = settings.MAX_FETCH_SOURCES
         candidates = ranked_hits[:max_fetch]
         fetch_outcomes = await asyncio.gather(
@@ -154,9 +241,10 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
             return_exceptions=True,
         )
 
-        # 5. Parse HTML / PDF in memory (never storing raw bytes in ResearchState)
+        # 6. Parse HTML / PDF in memory (never storing raw bytes in ResearchState)
         parsed_docs: list[dict[str, Any]] = []
-        fetch_counts = {"fetched": 0, "spa_shell": 0, "snippet_only": 0}
+        spa_pending: list[tuple[SearchResult, Any, dict[str, Any]]] = []
+        fetch_counts = {"fetched": 0, "spa_shell": 0, "snippet_only": 0, "playwright_rendered": 0}
 
         for hit, outcome in zip(candidates, fetch_outcomes):
             if isinstance(outcome, Exception):
@@ -187,17 +275,7 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
                     is_spa = detect_spa_shell(html_str, extracted.get("text") or "")
 
                 if is_spa:
-                    fetch_counts["spa_shell"] += 1
-                    fallback_text = hit.snippet or (extracted.get("text") or "")
-                    parsed_docs.append({
-                        "url": outcome.url,
-                        "title": extracted.get("title") or hit.title or outcome.url,
-                        "text": fallback_text,
-                        "doc_type": "JS-SPA Shell (Snippet Only)",
-                        "source_tier": active_tier,
-                        "fetch_status": "spa_shell",
-                        "sha256_hash": outcome.sha256_hash,
-                    })
+                    spa_pending.append((hit, outcome, extracted))
                 else:
                     fetch_counts["fetched"] += 1
                     parsed_docs.append({
@@ -224,17 +302,55 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
                         "sha256_hash": outcome.sha256_hash,
                     })
 
-        # 6. Compile query-relevant passages & merge with any prior tier records
+        # 6b. Batch-render up to 2 SPA shells concurrently in a single Chromium session
+        if spa_pending:
+            rendered_docs = await safe_fetcher.fetch_rendered_html_batch(
+                [outcome.url for _, outcome, _ in spa_pending],
+                max_urls=2,
+            )
+            for hit, outcome, extracted in spa_pending:
+                rendered_doc = rendered_docs.get(outcome.url)
+                if rendered_doc is not None:
+                    rendered_html = rendered_doc.content.decode("utf-8", errors="replace")
+                    rendered_extracted = HTMLParser.parse_html(rendered_html, base_url=outcome.url)
+                    rendered_text = rendered_extracted.get("text") or ""
+                    if len(rendered_text.strip()) > 250:
+                        fetch_counts["playwright_rendered"] += 1
+                        parsed_docs.append({
+                            "url": outcome.url,
+                            "title": rendered_extracted.get("title") or hit.title or outcome.url,
+                            "text": rendered_text[:150000],
+                            "doc_type": "JS-SPA Rendered (Playwright)",
+                            "source_tier": active_tier,
+                            "fetch_status": "fetched",
+                            "sha256_hash": rendered_doc.sha256_hash,
+                        })
+                        continue
+
+                fetch_counts["spa_shell"] += 1
+                fallback_text = hit.snippet or (extracted.get("text") or "")
+                parsed_docs.append({
+                    "url": outcome.url,
+                    "title": extracted.get("title") or hit.title or outcome.url,
+                    "text": fallback_text,
+                    "doc_type": "JS-SPA Shell (Snippet Only)",
+                    "source_tier": active_tier,
+                    "fetch_status": "spa_shell",
+                    "sha256_hash": outcome.sha256_hash,
+                })
+
+        # 7. Compile query-relevant passages & merge with any prior tier records
         new_evidence = compile_relevant_evidence(
             parsed_docs,
             query=effective_query,
             research_plan=state.research_plan,
             tier=active_tier,
             start_index=len(state.evidence_records) + 1,
+            max_excerpt_chars=2200,
         )
         merged_evidence = [*state.evidence_records, *new_evidence]
 
-        # 7. Sufficiency gate & tier escalation decision
+        # 8. Sufficiency gate & tier escalation decision
         sufficient, feedback = is_evidence_sufficient(
             merged_evidence,
             query=effective_query,
@@ -242,10 +358,19 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
         )
 
         next_tier = _next_search_tier(active_tier)
+        fetched_after = {e.get("url", "") for e in merged_evidence if e.get("url")}
+        has_pool_for_next = bool(
+            next_tier
+            and any(
+                r.get("source_tier") == next_tier and r.get("url") not in fetched_after
+                for r in all_search_results
+            )
+        )
         should_escalate = (
             not sufficient
             and next_tier is not None
             and state.retry_count < settings.MAX_RESEARCH_RETRIES
+            and (not rate_limited or has_pool_for_next)
         )
 
         next_retry = state.retry_count + 1 if should_escalate else state.retry_count
@@ -254,6 +379,7 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
         dur = int((time.perf_counter() - t0) * 1000)
         summary = {
             "raw_hits": len(raw_hits),
+            "pool_promoted": len(pool_hits),
             "fetch_counts": fetch_counts,
             "new_evidence": len(new_evidence),
             "total_evidence": len(merged_evidence),
