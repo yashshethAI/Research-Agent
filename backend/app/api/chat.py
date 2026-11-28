@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -16,6 +18,8 @@ from backend.app.schemas.api import ChatRequest, ChatResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["Chat"])
+
+_SSE_HEARTBEAT_INTERVAL_S = 15.0
 
 
 NODE_STEP_LABELS: dict[str, str] = {
@@ -89,36 +93,76 @@ async def chat_stream_endpoint(request: ChatRequest) -> StreamingResponse:
             attempted_tiers: list[str] = []
             node_errors: list[dict[str, Any]] = []
 
-            async for event in gst_research_graph.astream(initial_state, stream_mode="updates"):
-                for node_name, node_output in event.items():
-                    tier_label = ""
-                    if isinstance(node_output, dict):
-                        if node_output.get("final_report"):
-                            final_report = node_output["final_report"]
-                        if node_output.get("evidence_records") is not None:
-                            evidence_records = node_output["evidence_records"]
-                        if node_output.get("citation_validation"):
-                            citations = node_output["citation_validation"].get("verified_citations", [])
-                        if "needs_clarification" in node_output:
-                            needs_clarification = node_output["needs_clarification"]
-                        if node_output.get("attempted_tiers"):
-                            attempted_tiers = node_output["attempted_tiers"]
-                            tier_label = attempted_tiers[-1]
-                        if node_output.get("node_errors"):
-                            node_errors = node_output["node_errors"]
+            queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 
-                    step_label = NODE_STEP_LABELS.get(node_name, f"Completed node: {node_name}")
-                    if node_name == "retrieve_evidence" and tier_label:
-                        step_label = f"{step_label} (Tier: {tier_label})"
+            async def _produce_graph_events() -> None:
+                try:
+                    async for ev in gst_research_graph.astream(initial_state, stream_mode="updates"):
+                        await queue.put(("update", ev))
+                    await queue.put(("done", None))
+                except Exception as exc:
+                    await queue.put(("error", exc))
 
-                    step_event = {
-                        "event": "step",
-                        "node": node_name,
-                        "tier": tier_label or None,
-                        "label": step_label,
-                        "status": "completed",
-                    }
-                    yield f"data: {json.dumps(step_event)}\n\n"
+            producer_task = asyncio.create_task(_produce_graph_events())
+            t_start = time.monotonic()
+
+            try:
+                while True:
+                    try:
+                        kind, payload = await asyncio.wait_for(
+                            queue.get(),
+                            timeout=_SSE_HEARTBEAT_INTERVAL_S,
+                        )
+                    except asyncio.TimeoutError:
+                        hb_event = {
+                            "event": "heartbeat",
+                            "elapsed_s": int(time.monotonic() - t_start),
+                        }
+                        yield f"data: {json.dumps(hb_event)}\n\n"
+                        continue
+
+                    if kind == "done":
+                        break
+                    if kind == "error":
+                        raise payload
+
+                    event = payload
+                    for node_name, node_output in event.items():
+                        tier_label = ""
+                        if isinstance(node_output, dict):
+                            if node_output.get("final_report"):
+                                final_report = node_output["final_report"]
+                            if node_output.get("evidence_records") is not None:
+                                evidence_records = node_output["evidence_records"]
+                            if node_output.get("citation_validation"):
+                                citations = node_output["citation_validation"].get("verified_citations", [])
+                            if "needs_clarification" in node_output:
+                                needs_clarification = node_output["needs_clarification"]
+                            if node_output.get("attempted_tiers"):
+                                attempted_tiers = node_output["attempted_tiers"]
+                                tier_label = attempted_tiers[-1]
+                            if node_output.get("node_errors"):
+                                node_errors = node_output["node_errors"]
+
+                        step_label = NODE_STEP_LABELS.get(node_name, f"Completed node: {node_name}")
+                        if node_name == "retrieve_evidence" and tier_label:
+                            step_label = f"{step_label} (Tier: {tier_label})"
+
+                        step_event = {
+                            "event": "step",
+                            "node": node_name,
+                            "tier": tier_label or None,
+                            "label": step_label,
+                            "status": "completed",
+                        }
+                        yield f"data: {json.dumps(step_event)}\n\n"
+            finally:
+                if not producer_task.done():
+                    producer_task.cancel()
+                    try:
+                        await producer_task
+                    except asyncio.CancelledError:
+                        pass
 
             complete_event = {
                 "event": "complete",

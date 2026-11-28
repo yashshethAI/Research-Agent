@@ -7,16 +7,25 @@ from backend.app.agents.nodes.retrieve_evidence import retrieve_evidence_node
 from backend.app.agents.state import ResearchState
 from backend.app.core.config import settings
 from backend.app.tools.fetcher import FetchedDocument, safe_fetcher
-from backend.app.tools.search.base import SearchNotConfiguredError, SearchResult
-from backend.app.tools.search.searxng_adapter import SearXNGSearchAdapter, _result_cache
+from backend.app.tools.search.base import (
+    SearchNotConfiguredError,
+    SearchResult,
+    SearchServiceUnavailableError,
+)
+from backend.app.tools.search.searxng_adapter import (
+    SearXNGSearchAdapter,
+    _result_cache,
+    clear_search_caches,
+)
 from backend.app.tools.source_validator import source_validator
 
 
 @pytest.fixture(autouse=True)
-def _clear_searxng_cache():
-    _result_cache.clear()
+def _clear_searxng_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "DATA_DIR", str(tmp_path))
+    clear_search_caches(tmp_path / "source_cache" / "search_cache")
     yield
-    _result_cache.clear()
+    clear_search_caches(tmp_path / "source_cache" / "search_cache")
 
 
 class _FakeAsyncClient:
@@ -553,3 +562,171 @@ async def test_searxng_skips_malformed_urls_without_hostname(monkeypatch):
     results = await adapter.search("what is GST implemented India")
     assert len(results) == 1
     assert results[0].url == "https://www.gst.gov.in/about/gst/history"
+
+
+@pytest.mark.asyncio
+async def test_searxng_retries_transient_connect_error_and_recovers(monkeypatch):
+    import asyncio
+
+    attempts = 0
+
+    async def no_sleep(_):
+        return None
+
+    def handler(url, params, headers):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise httpx.ConnectError("All connection attempts failed")
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "CBIC Circular",
+                        "url": "https://www.cbic.gov.in/circular.pdf",
+                        "content": "SAC code 9994",
+                        "score": 5.0,
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler, **kwargs))
+
+    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080", engines="bing,yahoo", use_site_operators=False)
+    results = await adapter.search("SAC code waste management")
+    assert attempts == 3
+    assert len(results) == 1
+
+
+@pytest.mark.asyncio
+async def test_searxng_unavailable_fails_fast_without_tier_escalation(monkeypatch):
+    import asyncio
+
+    from backend.app.agents.nodes.synthesize_answer import synthesize_answer_node
+    from backend.app.llm.factory import llm_factory
+
+    async def no_sleep(_):
+        return None
+
+    def handler_down(url, params, headers):
+        raise httpx.ConnectError("All connection attempts failed")
+
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler_down, **kwargs))
+    monkeypatch.setattr(settings, "SEARCH_PROVIDER", "searxng")
+    monkeypatch.setattr(settings, "SEARXNG_BASE_URL", "http://localhost:8080")
+    monkeypatch.setattr(llm_factory, "is_configured", lambda: True)
+
+    adapter = SearXNGSearchAdapter(base_url="http://localhost:8080", use_site_operators=False)
+    with pytest.raises(SearchServiceUnavailableError):
+        await adapter.search("SAC code waste management")
+
+    state = ResearchState(
+        query="SAC code waste management",
+        search_queries=["SAC code waste management", "GST SAC waste"],
+        search_tier="official",
+    )
+    out = await retrieve_evidence_node(state)
+    assert out["should_refine_search"] is False
+    assert "Failed to reach SearXNG" in (out.get("error_message") or "")
+    assert any(err["error_type"] == "SearchServiceUnavailableError" for err in out["node_errors"])
+
+    synth_state = state.model_copy(update=out)
+    synth_out = await synthesize_answer_node(synth_state)
+    assert "docker start searxng" in synth_out["final_report"]
+
+
+@pytest.mark.asyncio
+async def test_searxng_rotates_to_fallback_engines_on_rate_limit(monkeypatch):
+    engines_seen: list[str] = []
+
+    def handler(url, params, headers):
+        eng = params.get("engines", "")
+        engines_seen.append(eng)
+        if eng == "bing,yahoo":
+            return httpx.Response(
+                200,
+                json={"results": [], "unresponsive_engines": [["bing", "CAPTCHA"], ["yahoo", "too many requests"]]},
+            )
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "CBIC Waste Management",
+                        "url": "https://www.cbic.gov.in/waste-sac",
+                        "content": "SAC 9994 waste management",
+                        "score": 6.0,
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler, **kwargs))
+    adapter = SearXNGSearchAdapter(
+        base_url="http://localhost:8080",
+        engines="bing,yahoo",
+        fallback_engines="duckduckgo,startpage;brave,mojeek",
+        use_site_operators=False,
+    )
+    res1 = await adapter.search("SAC code waste management")
+    assert len(res1) == 1
+    assert engines_seen == ["bing,yahoo", "duckduckgo,startpage"]
+
+    # Subsequent query while bing,yahoo is in cooldown goes straight to healthy fallback
+    res2 = await adapter.search("GST rate sewage disposal")
+    assert len(res2) == 1
+    assert engines_seen[-1] == "duckduckgo,startpage"
+
+
+@pytest.mark.asyncio
+async def test_searxng_persistent_disk_cache_survives_memory_clear(monkeypatch, tmp_path):
+    calls = 0
+
+    def handler(url, params, headers):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {
+                        "title": "Cached GST Doc",
+                        "url": "https://www.cbic.gov.in/cached.pdf",
+                        "content": "Cached statutory content",
+                        "score": 5.0,
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _FakeAsyncClient(handler, **kwargs))
+    cache_dir = tmp_path / "search_cache"
+
+    adapter1 = SearXNGSearchAdapter(
+        base_url="http://localhost:8080",
+        engines="bing,yahoo",
+        use_site_operators=False,
+        cache_ttl_seconds=3600,
+        cache_dir=cache_dir,
+    )
+    res1 = await adapter1.search("Section 16 ITC")
+    assert calls == 1
+    assert len(res1) == 1
+
+    # Simulate process restart: wipe in-memory cache only
+    _result_cache.clear()
+    adapter2 = SearXNGSearchAdapter(
+        base_url="http://localhost:8080",
+        engines="bing,yahoo",
+        use_site_operators=False,
+        cache_ttl_seconds=3600,
+        cache_dir=cache_dir,
+    )
+    res2 = await adapter2.search("Section 16 ITC")
+    assert calls == 1
+    assert len(res2) == 1
+    assert res2[0].url == "https://www.cbic.gov.in/cached.pdf"

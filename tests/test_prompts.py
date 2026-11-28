@@ -15,6 +15,8 @@ def test_query_understanding_prompt_for_small_models():
     assert "{context}" in QUERY_UNDERSTANDING_PROMPT
     assert "{query}" in QUERY_UNDERSTANDING_PROMPT
     assert "needs_clarification" in QUERY_UNDERSTANDING_PROMPT
+    assert "standard statutory exceptions or conditions" in QUERY_UNDERSTANDING_PROMPT
+    assert "speculative business-profile questions" in QUERY_UNDERSTANDING_PROMPT
     assert "search_queries" in QUERY_UNDERSTANDING_PROMPT
     assert "time_range" in QUERY_UNDERSTANDING_PROMPT
 

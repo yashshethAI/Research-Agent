@@ -67,6 +67,11 @@ def render_sidebar(
             st.write(f"**Research/Planner LLM URL:** `{config_status.get('research_llm_base_url') or 'Same as Answer LLM'}`")
             st.write(f"**Search Provider:** `{search_provider}`")
             st.write(f"**Search URL:** `{search_base_url or 'Not Set'}`")
+            st.write(f"**Fallback Engines:** `{config_status.get('search_fallback_engines') or 'None'}`")
+            st.write(
+                f"**Cache TTLs:** Search `{config_status.get('search_cache_ttl_seconds', 0)}s` | "
+                f"URL `{config_status.get('source_cache_ttl_seconds', 0)}s`"
+            )
             st.write(f"**Tier 1 Official Domains:** {config_status.get('official_domains_count', 0)}")
             st.write(f"**Tier 2 Verified Secondary:** {config_status.get('verified_secondary_domains_count', 0)}")
             st.write(f"**Tier 3 Open-Web Fallback:** {'Enabled' if config_status.get('allow_unverified_fallback') else 'Disabled'}")

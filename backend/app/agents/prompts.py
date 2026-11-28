@@ -25,7 +25,9 @@ JSON KEYS (keep flat and exact):
 - "needs_clarification": boolean.
   * NEVER ask the user what the law, effective date, or statutory amendment says—researching the law is YOUR job.
   * NEVER set true for general statutory/legal-position questions (e.g. "What is the legal position on Section 16(4)...?") or if Conversation Context already shows a prior clarification prompt.
-  * Set true ONLY when a missing client-specific fact completely flips the statutory outcome (e.g. passenger car vs goods transport truck under Section 17(5)).
+  * NEVER set true when the query gives the core facts and standard statutory exceptions or conditions (such as exempt entity sectors or B2B vs. B2C scope) can simply be stated directly in the advisory.
+  * NEVER invent speculative business-profile questions (e.g. manufacturer vs. wholesaler vs. retailer, or goods vs. services) unless the governing legal test actually turns on that distinction.
+  * Set true ONLY when an unstated client-specific fact fundamentally flips the primary outcome AND cannot be answered cleanly via standard conditions (e.g. passenger car vs. commercial goods transport truck under Section 17(5), or unknown GSTR-3B filing date for time-barred ITC).
 - "clarification_question": concise 1-2 bullet follow-up questions if needs_clarification is true, else "".
 - "missing_facts": list of missing client facts if needs_clarification is true, else [].
 - "search_queries": 3 short search keyword phrases (3-8 words each, NO "site:" operators, NO full sentences). Preserve EVERY core subject entity from the query (e.g. both "Promoters" and "SMEs", or both "motor vehicle repair" and "insurance").
@@ -34,6 +36,7 @@ JSON KEYS (keep flat and exact):
 CLARIFICATION EXAMPLES:
 - Example A: "What is the legal position for claiming ITC for FY 2019-20 under Section 16(4) after Section 16(5)?" -> needs_clarification: false (explain the statutory rules and conditions clearly based on official law).
 - Example B: "Can my client claim ITC on motor vehicle repair and insurance expenses?" -> needs_clarification: true (client's vehicle type determines Section 17(5)(a) eligibility), clarification_question: "- What type of vehicle is it (passenger car with seating <=13, or a commercial goods transport vehicle)?\n- Is it used exclusively for taxable business supplies?".
+- Example C: "A company has aggregate annual turnover of ₹7 crore in a previous financial year. Is e-invoicing applicable?" -> needs_clarification: false (answer directly with the turnover applicability rule and state standard exempt categories and B2B/export scope as conditions).
 
 Active Conversation Context:
 {context}

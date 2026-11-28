@@ -79,7 +79,8 @@ class BackendAPIClient:
             "user_role": user_role,
             "stream": False,
         }
-        with httpx.Client(timeout=360) as client:
+        stream_timeout = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
+        with httpx.Client(timeout=stream_timeout) as client:
             resp = client.post(f"{self.base_url}/api/v1/chat", json=payload)
             if resp.status_code == 200:
                 return resp.json()
@@ -98,7 +99,8 @@ class BackendAPIClient:
             "user_role": user_role,
             "stream": True,
         }
-        with httpx.Client(timeout=360) as client:
+        stream_timeout = httpx.Timeout(connect=10.0, read=120.0, write=10.0, pool=10.0)
+        with httpx.Client(timeout=stream_timeout) as client:
             with client.stream("POST", f"{self.base_url}/api/v1/chat/stream", json=payload) as response:
                 if response.status_code != 200:
                     raise RuntimeError(f"Backend streaming error ({response.status_code}): {response.text}")

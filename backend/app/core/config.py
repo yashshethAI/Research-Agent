@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.0
     LLM_TIMEOUT: int = 180
     LLM_MAX_RETRIES: int = 2
+    LLM_REASONING_EFFORT: str | None = "low"
 
     # Optional Separate OpenAI-Compatible LLM for Query Understanding (falls back to LLM_* if unset)
     RESEARCH_LLM_BASE_URL: str | None = None
@@ -41,13 +42,16 @@ class Settings(BaseSettings):
     RESEARCH_LLM_TEMPERATURE: float | None = None
     RESEARCH_LLM_TIMEOUT: int | None = None
     RESEARCH_LLM_MAX_RETRIES: int | None = None
+    RESEARCH_LLM_REASONING_EFFORT: str | None = "none"
 
     # Web Search (Local-First SearXNG)
     SEARCH_PROVIDER: str = "searxng"
     SEARXNG_BASE_URL: str = "http://localhost:8080"
     SEARXNG_TIMEOUT: int = 30
     SEARXNG_ENGINES: str | None = "bing,yahoo"
+    SEARXNG_FALLBACK_ENGINES: str | None = "duckduckgo,startpage;brave,mojeek"
     SEARXNG_USE_SITE_OPERATORS: bool = False
+    SEARCH_CACHE_TTL_SECONDS: int = 3600
     MAX_SEARCH_RESULTS: int = 20
     MAX_FETCH_SOURCES: int = 8
     MAX_RESEARCH_RETRIES: int = 2
@@ -58,6 +62,7 @@ class Settings(BaseSettings):
     ENFORCE_OFFICIAL_DOMAINS: bool = True
     ALLOW_UNVERIFIED_FALLBACK: bool = False
     SOURCE_FETCH_TIMEOUT: int = 30
+    SOURCE_CACHE_TTL_SECONDS: int = 21600
     MAX_SOURCE_SIZE_MB: int = 20
 
     # Storage

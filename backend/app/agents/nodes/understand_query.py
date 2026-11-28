@@ -19,7 +19,7 @@ from backend.app.core.logging_utils import (
     set_log_context,
     strip_thinking_tags,
 )
-from backend.app.llm.factory import llm_factory, research_llm_factory
+from backend.app.llm.factory import invoke_llm_with_streaming, llm_factory, research_llm_factory
 from backend.app.storage.conversations import conversation_storage
 from backend.app.tools.evidence_extractor import normalize_llm_search_queries
 
@@ -192,11 +192,13 @@ async def understand_query_node(state: ResearchState) -> dict[str, Any]:
 
         try:
             llm = research_llm_factory.get_chat_model(max_tokens=700)
-            resp = await llm.ainvoke([
-                SystemMessage(content="Return valid JSON only. No explanations outside JSON."),
-                HumanMessage(content=prompt),
-            ])
-            raw_text = resp.content if isinstance(resp.content, str) else str(resp.content)
+            raw_text = await invoke_llm_with_streaming(
+                llm,
+                [
+                    SystemMessage(content="Return valid JSON only. No explanations outside JSON."),
+                    HumanMessage(content=prompt),
+                ],
+            )
             cleaned_text, think_chars = strip_thinking_tags(raw_text)
             if think_chars:
                 logger.info(f"Stripped {think_chars} chars of <think> tags from Call #1 response")

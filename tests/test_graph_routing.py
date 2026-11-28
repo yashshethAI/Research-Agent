@@ -259,3 +259,81 @@ async def test_graph_execution_unconfigured_llm(monkeypatch):
     assert "INFERENCE SETUP REQUIRED" in result_dict.get("final_report", "")
     assert result_dict.get("persisted") is True
     assert len(result_dict.get("execution_trace", [])) >= 3
+
+
+@pytest.mark.asyncio
+async def test_synthesize_answer_caps_prompt_evidence_budget(monkeypatch):
+    monkeypatch.setattr(llm_factory, "is_configured", lambda: True)
+    captured_prompts: list[str] = []
+
+    class _StreamingAnswerLLM:
+        async def astream(self, messages):
+            captured_prompts.append(messages[1].content)
+            yield SimpleNamespace(content="- [PERMITTED] Exempt under [SRC-001].")
+
+    monkeypatch.setattr(llm_factory, "get_chat_model", lambda max_tokens=None: _StreamingAnswerLLM())
+
+    oversized_records = [
+        {
+            "source_id": f"SRC-00{i}",
+            "title": f"CBIC Source {i}",
+            "url": f"https://www.cbic.gov.in/doc-{i}.pdf",
+            "authority": "CBIC",
+            "source_tier": "official",
+            "fetch_status": "fetched",
+            "section_or_rule": "Section 22",
+            "excerpt": "X" * 2200,
+            "verified": True,
+        }
+        for i in range(1, 6)
+    ]
+    state = ResearchState(
+        query="Is GST registration mandatory for Rs 18 lakh turnover in Gujarat?",
+        evidence_records=oversized_records,
+    )
+    out = await synthesize_answer_node(state)
+    assert "[PERMITTED]" in out["final_report"]
+    assert len(captured_prompts) == 1
+    assert captured_prompts[0].count("X") <= 5500
+
+
+@pytest.mark.asyncio
+async def test_synthesize_answer_adjusts_max_tokens_for_reasoning_effort(monkeypatch):
+    from backend.app.core.config import settings
+
+    monkeypatch.setattr(llm_factory, "is_configured", lambda: True)
+    seen_max_tokens: list[int | None] = []
+
+    class _FakeStreamingLLM:
+        async def astream(self, messages):
+            yield SimpleNamespace(content="- [PERMITTED] Covered under [SRC-001].")
+
+    def fake_get_chat_model(max_tokens=None):
+        seen_max_tokens.append(max_tokens)
+        return _FakeStreamingLLM()
+
+    monkeypatch.setattr(llm_factory, "get_chat_model", fake_get_chat_model)
+
+    state = ResearchState(
+        query="Is e-invoicing applicable?",
+        evidence_records=[
+            {
+                "source_id": "SRC-001",
+                "title": "CBIC Rule 48(4)",
+                "url": "https://www.cbic.gov.in/rule48.html",
+                "authority": "CBIC",
+                "source_tier": "official",
+                "fetch_status": "fetched",
+                "section_or_rule": "Rule 48(4)",
+                "excerpt": "E-invoicing threshold rules.",
+                "verified": True,
+            }
+        ],
+    )
+
+    monkeypatch.setattr(settings, "LLM_REASONING_EFFORT", "low")
+    await synthesize_answer_node(state)
+    monkeypatch.setattr(settings, "LLM_REASONING_EFFORT", "none")
+    await synthesize_answer_node(state)
+
+    assert seen_max_tokens == [2200, 1500]

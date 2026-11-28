@@ -23,6 +23,10 @@ class SearchEngineRateLimitError(RuntimeError):
     """Raised when SearXNG upstream engines return CAPTCHA, rate-limit, or suspension errors."""
 
 
+class SearchServiceUnavailableError(RuntimeError):
+    """Raised when the configured search service (e.g., SearXNG) cannot be reached."""
+
+
 class BaseSearchProvider(abc.ABC):
     """Abstract interface for GST legal search providers."""
 

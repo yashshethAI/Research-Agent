@@ -84,6 +84,33 @@ def normalize_llm_search_queries(
     return cleaned_queries
 
 
+_NON_CONTENT_PORTAL_PATHS = (
+    "/services/login",
+    "/services/searchtp",
+    "/gst-number-search",
+    "/registration/",
+    "/payment/",
+    "/login",
+    "/signin",
+)
+
+_BOT_BLOCK_MARKERS = (
+    "cf-browser-verification",
+    "cf-challenge",
+    "attention required! | cloudflare",
+    "verify you are human",
+    "checking your browser before accessing",
+    "just a moment...",
+    "g-recaptcha",
+    "hcaptcha",
+    "turnstile",
+    "access denied",
+    "request blocked",
+    "pardon our interruption",
+    "enable cookies and javascript",
+)
+
+
 def rerank_search_results(
     results: list[SearchResult],
     query: str,
@@ -116,6 +143,8 @@ def rerank_search_results(
         doc_bonus = 0.0
         if url_lower.endswith(".pdf") or any(k in url_lower for k in ("circular", "notification", "judgment", "order", "act")):
             doc_bonus += 2.0
+        if any(p in url_lower for p in _NON_CONTENT_PORTAL_PATHS):
+            doc_bonus -= 5.0
         if len(url_lower.rstrip("/").split("/")) <= 3 and not r.snippet:
             doc_bonus -= 2.0
 
@@ -154,6 +183,19 @@ def _strip_portal_chrome(text: str) -> str:
         and not re.match(r"^(?:english|hindi|rti|faqs|address\s*:|phone\s*:|e-?mail\s*:)", ln, re.IGNORECASE)
     ]
     return "\n".join(kept).strip()
+
+
+def detect_bot_block(html_text: str, extracted_text: str) -> bool:
+    """Detects WAF, Cloudflare, or CAPTCHA interstitial pages lacking substantive legal text."""
+    clean_body = _strip_portal_chrome(extracted_text or "")
+    body_l = clean_body.lower()
+    if len(clean_body) >= 1200 or any(
+        cue in body_l for cue in ("cgst act", "igst act", "notification no", "circular no")
+    ):
+        return False
+
+    combined_l = f"{(html_text or '')[:12000]}\n{body_l}".lower()
+    return any(marker in combined_l for marker in _BOT_BLOCK_MARKERS)
 
 
 def detect_spa_shell(html_text: str, extracted_text: str) -> bool:

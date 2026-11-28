@@ -240,3 +240,127 @@ async def test_playwright_batch_isolates_loop_and_caps_urls(monkeypatch):
         "https://taxinformation.cbic.gov.in/spa-1",
         "https://www.gst.gov.in/spa-2",
     }
+
+
+@pytest.mark.asyncio
+async def test_safe_fetcher_apex_fallback_on_hostname_mismatch_and_url_cache(monkeypatch, tmp_path):
+    import httpx
+
+    import backend.app.tools.fetcher as fetcher_mod
+    from backend.app.storage.source_cache import SourceCacheStorage
+
+    requested_urls: list[str] = []
+
+    class _MockAsyncClient:
+        def __init__(self, **kwargs):
+            self.verify = kwargs.get("verify", True)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, headers=None):
+            requested_urls.append(url)
+            if url.startswith("https://www.idtc.icai.org"):
+                raise httpx.ConnectError(
+                    "[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: Hostname mismatch, certificate is not valid for 'www.idtc.icai.org'."
+                )
+            return httpx.Response(
+                200,
+                content=b"<html><body><h1>ICAI GST Update</h1><p>Detailed indirect tax update.</p></body></html>",
+                headers={"content-type": "text/html"},
+                request=httpx.Request("GET", url),
+            )
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: _MockAsyncClient(**kwargs))
+    monkeypatch.setattr(source_validator, "assert_valid_url", lambda url, allow_unverified=False: None)
+    monkeypatch.setattr(settings, "SOURCE_CACHE_TTL_SECONDS", 21600)
+
+    fetcher = fetcher_mod.SafeFetcher(cache_storage=SourceCacheStorage(storage_dir=tmp_path))
+    doc1 = await fetcher.fetch("https://www.idtc.icai.org/indirect-tax-update.html")
+    assert doc1.url == "https://idtc.icai.org/indirect-tax-update.html"
+    assert requested_urls == [
+        "https://www.idtc.icai.org/indirect-tax-update.html",
+        "https://idtc.icai.org/indirect-tax-update.html",
+    ]
+
+    # Second fetch of original URL reuses URL cache with zero HTTP calls
+    doc2 = await fetcher.fetch("https://www.idtc.icai.org/indirect-tax-update.html")
+    assert doc2.sha256_hash == doc1.sha256_hash
+    assert len(requested_urls) == 2
+
+
+@pytest.mark.asyncio
+async def test_retrieve_evidence_skips_playwright_on_bot_block_and_backfills(monkeypatch):
+    playwright_calls: list[str] = []
+    fetched_urls: list[str] = []
+
+    monkeypatch.setattr(settings, "SEARCH_PROVIDER", "searxng")
+    monkeypatch.setattr(settings, "SEARXNG_BASE_URL", "http://localhost:8080")
+    monkeypatch.setattr(settings, "MAX_FETCH_SOURCES", 2)
+
+    async def mock_search(self, query, domains=None, max_results=10, time_range=None):
+        return [
+            SearchResult(
+                title="Blocked Page",
+                url="https://www.taxmann.com/blocked",
+                snippet="Blocked page snippet",
+                domain="www.taxmann.com",
+                score=9.0,
+            ),
+            SearchResult(
+                title="Dead Page",
+                url="https://taxinformation.cbic.gov.in/dead",
+                snippet="Dead page snippet",
+                domain="taxinformation.cbic.gov.in",
+                score=8.0,
+            ),
+            SearchResult(
+                title="Backfill Healthy CBIC",
+                url="https://www.cbic.gov.in/healthy-sac",
+                snippet="SAC 9994 waste management snippet",
+                domain="www.cbic.gov.in",
+                score=7.0,
+            ),
+        ]
+
+    async def mock_fetch(url: str, allow_unverified: bool = False):
+        fetched_urls.append(url)
+        if "blocked" in url:
+            return FetchedDocument(
+                url=url,
+                content=b"<html><title>Attention Required! | Cloudflare</title><body>Verify you are human.</body></html>",
+                content_type="text/html",
+                status_code=200,
+                sha256_hash="blockedhash",
+                file_path="",
+            )
+        if "dead" in url:
+            raise TimeoutError("Timed out")
+        return FetchedDocument(
+            url=url,
+            content=b"<html><body><h1>SAC 9994</h1><p>Sewage and waste collection, treatment and disposal services under CGST Notification 11/2017-CT(R).</p></body></html>",
+            content_type="text/html",
+            status_code=200,
+            sha256_hash="healthyhash",
+            file_path="",
+        )
+
+    async def mock_fetch_rendered(url: str):
+        playwright_calls.append(url)
+        return None
+
+    monkeypatch.setattr(SearXNGSearchAdapter, "search", mock_search)
+    monkeypatch.setattr(source_validator, "validate_url", lambda url, allow_unverified=False: (True, "ok"))
+    monkeypatch.setattr(safe_fetcher, "fetch", mock_fetch)
+    monkeypatch.setattr(safe_fetcher, "fetch_rendered_html", mock_fetch_rendered)
+
+    state = ResearchState(query="SAC code waste management", search_queries=["SAC code waste management"])
+    out = await retrieve_evidence_node(state)
+
+    assert playwright_calls == []
+    assert "https://www.cbic.gov.in/healthy-sac" in fetched_urls
+    assert any(r["fetch_status"] == "fetched" and "healthy-sac" in r["url"] for r in out["evidence_records"])
+    assert any(err["substep"] == "fetch_blocked" for err in out["node_errors"])

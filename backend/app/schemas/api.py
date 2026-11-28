@@ -41,6 +41,9 @@ class ConfigStatusResponse(BaseModel):
     search_provider: str
     search_reachable: bool = False
     search_base_url: str | None = None
+    search_fallback_engines: str | None = None
+    search_cache_ttl_seconds: int = 3600
+    source_cache_ttl_seconds: int = 21600
     search_status_message: str | None = None
     official_domains_count: int
     verified_secondary_domains_count: int = 0

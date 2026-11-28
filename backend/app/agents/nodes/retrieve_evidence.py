@@ -15,6 +15,7 @@ from backend.app.core.logging_utils import (
 )
 from backend.app.tools.evidence_extractor import (
     compile_relevant_evidence,
+    detect_bot_block,
     detect_spa_shell,
     is_evidence_sufficient,
     normalize_llm_search_queries,
@@ -27,6 +28,7 @@ from backend.app.tools.search.base import (
     SearchEngineRateLimitError,
     SearchNotConfiguredError,
     SearchResult,
+    SearchServiceUnavailableError,
 )
 from backend.app.tools.search.mock_adapter import MockSearchAdapter
 from backend.app.tools.search.searxng_adapter import SearXNGSearchAdapter
@@ -39,6 +41,7 @@ _TIER_HINTS: dict[str, str] = {
     "official": "CBIC",
     "verified_secondary": "Taxmann ICAI",
 }
+_BACKFILL_BATCH_LIMIT = 4
 
 
 def _next_search_tier(current_tier: str) -> str | None:
@@ -78,11 +81,7 @@ def _promote_from_pool(
     target_tier: str,
     seen_urls: set[str],
 ) -> list[SearchResult]:
-    """Promotes already-fetched URLs matching target_tier from the unfiltered result pool.
-
-    This avoids re-querying SearXNG when escalating tiers, since earlier searches
-    may have discovered Tier 2/3 URLs that were not needed at that time.
-    """
+    """Promotes already-fetched URLs matching target_tier from the unfiltered result pool."""
     promoted: list[SearchResult] = []
     for r in existing_results:
         url = r.get("url", "")
@@ -101,6 +100,108 @@ def _promote_from_pool(
             )
             seen_urls.add(url)
     return promoted
+
+
+async def _fetch_and_parse_candidates(
+    candidates: list[SearchResult],
+    active_tier: str,
+    allow_unverified: bool,
+    errors: list[dict[str, Any]],
+    fetch_counts: dict[str, int],
+) -> tuple[list[dict[str, Any]], list[tuple[SearchResult, Any, dict[str, Any]]]]:
+    """Fetches candidate URLs in parallel, parses HTML/PDF, filters bot gates, and queues SPA shells."""
+    if not candidates:
+        return [], []
+
+    fetch_outcomes = await asyncio.gather(
+        *[safe_fetcher.fetch(r.url, allow_unverified=allow_unverified) for r in candidates],
+        return_exceptions=True,
+    )
+
+    parsed_docs: list[dict[str, Any]] = []
+    spa_pending: list[tuple[SearchResult, Any, dict[str, Any]]] = []
+
+    for hit, outcome in zip(candidates, fetch_outcomes):
+        if isinstance(outcome, Exception):
+            logger.warning(f"Fetch failed for {hit.url}: {type(outcome).__name__}: {outcome}")
+            errors.append(make_node_error("retrieve_evidence", "fetch", outcome, hit.url))
+            if hit.snippet:
+                fetch_counts["snippet_only"] += 1
+                parsed_docs.append({
+                    "url": hit.url,
+                    "title": hit.title or hit.url,
+                    "text": hit.snippet,
+                    "doc_type": "Search Snippet Fallback",
+                    "source_tier": active_tier,
+                    "fetch_status": "snippet_only",
+                    "sha256_hash": f"snippet-{abs(hash(hit.url)) % 1000000:06d}",
+                })
+            continue
+
+        try:
+            if "pdf" in outcome.content_type or outcome.url.lower().endswith(".pdf"):
+                extracted = PDFParser.parse_pdf_bytes(outcome.content)
+                doc_type = "PDF Notification / Circular / Order"
+                is_bot_blocked = False
+                is_spa = False
+            else:
+                html_str = outcome.content.decode("utf-8", errors="replace")
+                extracted = HTMLParser.parse_html(html_str, base_url=outcome.url)
+                doc_type = "Statutory Portal HTML Page"
+                extracted_text = extracted.get("text") or ""
+                is_bot_blocked = detect_bot_block(html_str, extracted_text)
+                is_spa = False if is_bot_blocked else detect_spa_shell(html_str, extracted_text)
+
+            if is_bot_blocked:
+                logger.warning(f"Bot/CAPTCHA gate detected for {outcome.url}; skipping Playwright.")
+                errors.append(
+                    make_node_error(
+                        "retrieve_evidence",
+                        "fetch_blocked",
+                        RuntimeError("Target site returned WAF/CAPTCHA interstitial"),
+                        outcome.url,
+                    )
+                )
+                if hit.snippet:
+                    fetch_counts["snippet_only"] += 1
+                    parsed_docs.append({
+                        "url": outcome.url,
+                        "title": hit.title or outcome.url,
+                        "text": hit.snippet,
+                        "doc_type": "Blocked Page Snippet Fallback",
+                        "source_tier": active_tier,
+                        "fetch_status": "snippet_only",
+                        "sha256_hash": outcome.sha256_hash,
+                    })
+            elif is_spa:
+                spa_pending.append((hit, outcome, extracted))
+            else:
+                fetch_counts["fetched"] += 1
+                parsed_docs.append({
+                    "url": outcome.url,
+                    "title": extracted.get("title") or hit.title or outcome.url,
+                    "text": (extracted.get("text") or "")[:150000],
+                    "doc_type": doc_type,
+                    "source_tier": active_tier,
+                    "fetch_status": "fetched",
+                    "sha256_hash": outcome.sha256_hash,
+                })
+        except Exception as parse_err:
+            logger.error(f"Parse error for {outcome.url}: {parse_err}")
+            errors.append(make_node_error("retrieve_evidence", "parse", parse_err, outcome.url))
+            if hit.snippet:
+                fetch_counts["snippet_only"] += 1
+                parsed_docs.append({
+                    "url": outcome.url,
+                    "title": hit.title or hit.url,
+                    "text": hit.snippet,
+                    "doc_type": "Parse Error Snippet Fallback",
+                    "source_tier": active_tier,
+                    "fetch_status": "snippet_only",
+                    "sha256_hash": outcome.sha256_hash,
+                })
+
+    return parsed_docs, spa_pending
 
 
 async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
@@ -171,15 +272,13 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
         early_stop_threshold = 5
 
         for idx, q in enumerate(queries):
-            # Early stop: if we already have enough unfiltered hits, skip remaining queries
             if len(raw_hits) >= early_stop_threshold:
                 logger.info(f"Early stop: {len(raw_hits)} hits already, skipping remaining queries")
                 break
 
             if idx > 0 and settings.SEARCH_PROVIDER == "searxng":
-                await asyncio.sleep(0.6)
+                await asyncio.sleep(1.2)
 
-            # Add tier hint when site: operators are disabled
             hinted_query = _add_tier_hint(q, active_tier)
 
             try:
@@ -196,8 +295,8 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
                         raw_hits.append(r)
                     elif not is_valid:
                         logger.debug(f"Filtered URL ({reason}): {r.url}")
-            except SearchNotConfiguredError as e:
-                logger.warning(f"Search not configured: {e}")
+            except (SearchNotConfiguredError, SearchServiceUnavailableError) as e:
+                logger.warning(f"Search unavailable/unconfigured: {e}")
                 errors.append(make_node_error("retrieve_evidence", "search", e, q))
                 dur = int((time.perf_counter() - t0) * 1000)
                 trace.append(make_trace_entry("retrieve_evidence", active_tier, "error", dur, error=str(e)))
@@ -233,80 +332,36 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
                 tier_search_results.append({**r.model_dump(), "source_tier": real_tier})
         all_search_results = [*state.search_results, *tier_search_results]
 
-        # 5. Parallel fetch top candidates
+        # 5 & 6. Parallel fetch top candidates + parse
         max_fetch = settings.MAX_FETCH_SOURCES
-        candidates = ranked_hits[:max_fetch]
-        fetch_outcomes = await asyncio.gather(
-            *[safe_fetcher.fetch(r.url, allow_unverified=allow_unverified) for r in candidates],
-            return_exceptions=True,
+        fetch_counts = {"fetched": 0, "spa_shell": 0, "snippet_only": 0, "playwright_rendered": 0}
+        parsed_docs, spa_pending = await _fetch_and_parse_candidates(
+            ranked_hits[:max_fetch],
+            active_tier=active_tier,
+            allow_unverified=allow_unverified,
+            errors=errors,
+            fetch_counts=fetch_counts,
         )
 
-        # 6. Parse HTML / PDF in memory (never storing raw bytes in ResearchState)
-        parsed_docs: list[dict[str, Any]] = []
-        spa_pending: list[tuple[SearchResult, Any, dict[str, Any]]] = []
-        fetch_counts = {"fetched": 0, "spa_shell": 0, "snippet_only": 0, "playwright_rendered": 0}
+        # 6a. Backfill from remaining ranked hits if initial candidates failed/blocked
+        usable_target = min(4, max_fetch)
+        if fetch_counts["fetched"] + len(spa_pending) < usable_target and len(ranked_hits) > max_fetch:
+            backfill_candidates = ranked_hits[max_fetch : max_fetch + _BACKFILL_BATCH_LIMIT]
+            extra_docs, extra_spa = await _fetch_and_parse_candidates(
+                backfill_candidates,
+                active_tier=active_tier,
+                allow_unverified=allow_unverified,
+                errors=errors,
+                fetch_counts=fetch_counts,
+            )
+            parsed_docs.extend(extra_docs)
+            spa_pending.extend(extra_spa)
 
-        for hit, outcome in zip(candidates, fetch_outcomes):
-            if isinstance(outcome, Exception):
-                logger.warning(f"Fetch failed for {hit.url}: {type(outcome).__name__}: {outcome}")
-                errors.append(make_node_error("retrieve_evidence", "fetch", outcome, hit.url))
-                if hit.snippet:
-                    fetch_counts["snippet_only"] += 1
-                    parsed_docs.append({
-                        "url": hit.url,
-                        "title": hit.title or hit.url,
-                        "text": hit.snippet,
-                        "doc_type": "Search Snippet Fallback",
-                        "source_tier": active_tier,
-                        "fetch_status": "snippet_only",
-                        "sha256_hash": f"snippet-{abs(hash(hit.url)) % 1000000:06d}",
-                    })
-                continue
-
-            try:
-                if "pdf" in outcome.content_type or outcome.url.lower().endswith(".pdf"):
-                    extracted = PDFParser.parse_pdf_bytes(outcome.content)
-                    doc_type = "PDF Notification / Circular / Order"
-                    is_spa = False
-                else:
-                    html_str = outcome.content.decode("utf-8", errors="replace")
-                    extracted = HTMLParser.parse_html(html_str, base_url=outcome.url)
-                    doc_type = "Statutory Portal HTML Page"
-                    is_spa = detect_spa_shell(html_str, extracted.get("text") or "")
-
-                if is_spa:
-                    spa_pending.append((hit, outcome, extracted))
-                else:
-                    fetch_counts["fetched"] += 1
-                    parsed_docs.append({
-                        "url": outcome.url,
-                        "title": extracted.get("title") or hit.title or outcome.url,
-                        "text": (extracted.get("text") or "")[:150000],
-                        "doc_type": doc_type,
-                        "source_tier": active_tier,
-                        "fetch_status": "fetched",
-                        "sha256_hash": outcome.sha256_hash,
-                    })
-            except Exception as parse_err:
-                logger.error(f"Parse error for {outcome.url}: {parse_err}")
-                errors.append(make_node_error("retrieve_evidence", "parse", parse_err, outcome.url))
-                if hit.snippet:
-                    fetch_counts["snippet_only"] += 1
-                    parsed_docs.append({
-                        "url": outcome.url,
-                        "title": hit.title or outcome.url,
-                        "text": hit.snippet,
-                        "doc_type": "Parse Error Snippet Fallback",
-                        "source_tier": active_tier,
-                        "fetch_status": "snippet_only",
-                        "sha256_hash": outcome.sha256_hash,
-                    })
-
-        # 6b. Batch-render up to 2 SPA shells concurrently in a single Chromium session
+        # 6b. Batch-render up to 3 SPA shells concurrently in a single Chromium session
         if spa_pending:
             rendered_docs = await safe_fetcher.fetch_rendered_html_batch(
                 [outcome.url for _, outcome, _ in spa_pending],
-                max_urls=2,
+                max_urls=3,
             )
             for hit, outcome, extracted in spa_pending:
                 rendered_doc = rendered_docs.get(outcome.url)
@@ -314,7 +369,7 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
                     rendered_html = rendered_doc.content.decode("utf-8", errors="replace")
                     rendered_extracted = HTMLParser.parse_html(rendered_html, base_url=outcome.url)
                     rendered_text = rendered_extracted.get("text") or ""
-                    if len(rendered_text.strip()) > 250:
+                    if not detect_bot_block(rendered_html, rendered_text) and len(rendered_text.strip()) > 250:
                         fetch_counts["playwright_rendered"] += 1
                         parsed_docs.append({
                             "url": outcome.url,

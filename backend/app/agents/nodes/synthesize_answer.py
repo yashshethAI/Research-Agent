@@ -18,9 +18,12 @@ from backend.app.core.logging_utils import (
     set_log_context,
     strip_thinking_tags,
 )
-from backend.app.llm.factory import llm_factory
+from backend.app.llm.factory import invoke_llm_with_streaming, llm_factory
 
 logger = logging.getLogger(__name__)
+
+_MAX_PROMPT_EXCERPT_CHARS = 1200
+_MAX_PROMPT_EVIDENCE_TOTAL_CHARS = 5500
 
 
 def _prioritize_evidence_for_llm(evidence: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
@@ -87,21 +90,36 @@ async def synthesize_answer_node(state: ResearchState) -> dict[str, Any]:
         # Zero-evidence hallucination guard: never let <26B models guess GST law with 0 retrieved sources
         if not state.evidence_records:
             tiers_tried = ", ".join(state.attempted_tiers) if state.attempted_tiers else state.search_tier
+            retrieval_errors = [e for e in errors if e.get("node") == "retrieve_evidence"]
             err_lines = [
                 f"- `{e.get('substep')}` ({e.get('error_type')}): {e.get('detail')}"
-                for e in errors
-                if e.get("node") == "retrieve_evidence"
+                for e in retrieval_errors
             ]
             err_section = (
                 "\n\n**Retrieval Diagnostics:**\n" + "\n".join(err_lines[:5])
                 if err_lines
                 else ""
             )
+            searxng_offline = any(
+                e.get("error_type") == "SearchServiceUnavailableError" for e in retrieval_errors
+            ) or ("Failed to reach SearXNG" in (state.error_message or ""))
+            if searxng_offline:
+                suggested_action = (
+                    f"- **Suggested Action**: SearXNG could not be reached at `{settings.SEARXNG_BASE_URL}`. "
+                    "Ensure Docker Desktop and the `searxng` container are running (`docker start searxng`), "
+                    "verify `/api/v1/health` shows Search Ready, and retry your query."
+                )
+            else:
+                suggested_action = (
+                    "- **Suggested Action**: Check SearXNG engine availability (wait ~1–2 minutes if upstream engines "
+                    "hit CAPTCHA/rate limits), retry the query, or enable `ALLOW_UNVERIFIED_FALLBACK=true` in `.env` "
+                    "if testing open-web fallback."
+                )
             no_evidence_report = (
                 "[FURTHER VERIFICATION REQUIRED]\n\n"
                 f"No verifiable GST sources could be retrieved across tier(s): `{tiers_tried}`.\n\n"
                 "- **Why no answer was generated**: Answering without retrieved official or secondary sources risks hallucinating GST rates, notifications, or court rulings.\n"
-                "- **Suggested Action**: Check SearXNG engine availability (wait ~1–2 minutes if upstream engines hit CAPTCHA/rate limits), retry the query, or enable `ALLOW_UNVERIFIED_FALLBACK=true` in `.env` if testing open-web fallback."
+                f"{suggested_action}"
                 f"{err_section}"
             )
             dur = int((time.perf_counter() - t0) * 1000)
@@ -120,16 +138,23 @@ async def synthesize_answer_node(state: ResearchState) -> dict[str, Any]:
         )
 
         evidence_blocks: list[str] = []
+        used_chars = 0
         for e in selected_evidence:
-            evidence_blocks.append(
+            raw_excerpt = (e.get("excerpt") or "").strip()
+            clipped_excerpt = raw_excerpt[:_MAX_PROMPT_EXCERPT_CHARS].strip()
+            block = (
                 f"- Source ID: {e.get('source_id')}\n"
                 f"  Tier: {e.get('source_tier')} | Fetch Status: {e.get('fetch_status')} | Verified: {e.get('verified')}\n"
                 f"  Title: {e.get('title')}\n"
                 f"  Authority: {e.get('authority')}\n"
                 f"  Provisions: {e.get('section_or_rule')}\n"
                 f"  URL: {e.get('url')}\n"
-                f"  Excerpt:\n  \"\"\"{e.get('excerpt')}\"\"\"\n"
+                f"  Excerpt:\n  \"\"\"{clipped_excerpt}\"\"\"\n"
             )
+            if evidence_blocks and used_chars + len(block) > _MAX_PROMPT_EVIDENCE_TOTAL_CHARS:
+                break
+            evidence_blocks.append(block)
+            used_chars += len(block)
 
         evidence_str = (
             "\n".join(evidence_blocks)
@@ -161,12 +186,16 @@ async def synthesize_answer_node(state: ResearchState) -> dict[str, Any]:
         )
 
         try:
-            llm = llm_factory.get_chat_model(max_tokens=2000)
-            response = await llm.ainvoke([
-                SystemMessage(content=GST_RESEARCHER_SYSTEM_PROMPT),
-                HumanMessage(content=prompt),
-            ])
-            raw_content = response.content if isinstance(response.content, str) else str(response.content)
+            effort = (llm_factory.reasoning_effort or "").lower()
+            answer_max_tokens = 1500 if effort in ("", "none") else 2200
+            llm = llm_factory.get_chat_model(max_tokens=answer_max_tokens)
+            raw_content = await invoke_llm_with_streaming(
+                llm,
+                [
+                    SystemMessage(content=GST_RESEARCHER_SYSTEM_PROMPT),
+                    HumanMessage(content=prompt),
+                ],
+            )
             content_text, think_chars = strip_thinking_tags(raw_content)
             if think_chars:
                 logger.info(f"Stripped {think_chars} chars of <think> tags from Call #2 response")

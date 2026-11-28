@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from backend.app.core.config import settings
-from backend.app.llm.factory import LLMFactory, LLMNotConfiguredError, research_llm_factory
+from backend.app.llm.factory import (
+    LLMFactory,
+    LLMNotConfiguredError,
+    invoke_llm_with_streaming,
+    research_llm_factory,
+)
 
 
 def test_factory_unconfigured():
@@ -117,3 +122,31 @@ def test_research_llm_factory_uses_research_overrides_and_falls_back(monkeypatch
     main_factory = LLMFactory()
     assert main_factory.base_url == "http://main-llm:8000/v1"
     assert main_factory.model_name == "qwen3:14b"
+
+
+def test_factory_passes_reasoning_effort_to_chat_model(monkeypatch):
+    monkeypatch.setattr(settings, "LLM_BASE_URL", "http://main-llm:8000/v1")
+    monkeypatch.setattr(settings, "LLM_REASONING_EFFORT", "low")
+    monkeypatch.setattr(settings, "RESEARCH_LLM_REASONING_EFFORT", "none")
+
+    answer_model = LLMFactory().get_chat_model()
+    planner_model = research_llm_factory.get_chat_model()
+    assert answer_model.reasoning_effort == "low"
+    assert planner_model.reasoning_effort == "none"
+
+
+@pytest.mark.asyncio
+async def test_invoke_llm_with_streaming_and_fallback():
+    from types import SimpleNamespace
+
+    class _StreamingStub:
+        async def astream(self, messages):
+            yield SimpleNamespace(content="Part 1 ")
+            yield SimpleNamespace(content=[{"type": "text", "text": "Part 2"}])
+
+    class _InvokeStub:
+        async def ainvoke(self, messages):
+            return SimpleNamespace(content="Fallback response")
+
+    assert await invoke_llm_with_streaming(_StreamingStub(), []) == "Part 1 Part 2"
+    assert await invoke_llm_with_streaming(_InvokeStub(), []) == "Fallback response"

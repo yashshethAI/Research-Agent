@@ -119,6 +119,13 @@ class LLMFactory:
         val = self._get_setting("LLM_MAX_RETRIES", 2)
         return int(val if val is not None else settings.LLM_MAX_RETRIES)
 
+    @property
+    def reasoning_effort(self) -> str | None:
+        val = self._get_setting("LLM_REASONING_EFFORT")
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+        return None
+
     def is_configured(self) -> bool:
         """Returns True if an LLM base URL is present."""
         return bool(self.base_url and self.base_url.strip())
@@ -176,10 +183,31 @@ class LLMFactory:
             "max_retries": self.max_retries,
             "default_headers": self.get_default_headers(),
         }
+        if self.reasoning_effort:
+            kwargs["reasoning_effort"] = self.reasoning_effort
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
 
         return ChatOpenAI(**kwargs)
+
+
+async def invoke_llm_with_streaming(llm: Any, messages: list[Any]) -> str:
+    """Streams tokens when supported by the model to keep remote HTTP sockets alive, falling back to ainvoke."""
+    if hasattr(llm, "astream"):
+        parts: list[str] = []
+        async for chunk in llm.astream(messages):
+            content = getattr(chunk, "content", chunk)
+            if isinstance(content, str) and content:
+                parts.append(content)
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and isinstance(item.get("text"), str):
+                        parts.append(item["text"])
+        return "".join(parts)
+
+    response = await llm.ainvoke(messages)
+    content = getattr(response, "content", response)
+    return content if isinstance(content, str) else str(content)
 
 
 # Global factory instances

@@ -41,6 +41,10 @@ def test_api_config_status_endpoint(monkeypatch):
     assert "research_llm_model" in data
     assert "search_configured" in data
     assert data["search_provider"] == settings.SEARCH_PROVIDER
+    assert data["search_reachable"] is False
+    assert "search_fallback_engines" in data
+    assert "search_cache_ttl_seconds" in data
+    assert "source_cache_ttl_seconds" in data
     assert "official_domains_count" in data
     assert "verified_secondary_domains_count" in data
     assert "allow_unverified_fallback" in data
@@ -108,3 +112,33 @@ def test_api_chat_stream_endpoint(monkeypatch):
         assert events[0]["event"] == "started"
         event_types = [e["event"] for e in events]
         assert "complete" in event_types
+
+
+def test_api_chat_stream_emits_heartbeat_during_slow_node(monkeypatch):
+    import asyncio
+
+    import backend.app.api.chat as chat_mod
+
+    async def slow_astream(state, stream_mode="updates"):
+        await asyncio.sleep(0.08)
+        yield {"understand_query": {"final_report": "Done", "needs_clarification": False}}
+
+    monkeypatch.setattr(chat_mod, "_SSE_HEARTBEAT_INTERVAL_S", 0.02)
+    monkeypatch.setattr(chat_mod.gst_research_graph, "astream", slow_astream)
+
+    payload = {
+        "query": "Test heartbeat query",
+        "conversation_id": "test-sse-hb-conv",
+        "user_role": "Professional",
+        "stream": True,
+    }
+    with client.stream("POST", "/api/v1/chat/stream", json=payload) as response:
+        assert response.status_code == 200
+        events = [
+            json.loads(line[6:])
+            for line in response.iter_lines()
+            if line.startswith("data: ")
+        ]
+    event_types = [e["event"] for e in events]
+    assert "heartbeat" in event_types
+    assert "complete" in event_types

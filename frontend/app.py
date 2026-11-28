@@ -130,6 +130,15 @@ if health.get("status") == "unreachable":
         "```",
         icon="🚨",
     )
+else:
+    search_status = health.get("search_status") or {}
+    if search_status.get("configured") and search_status.get("reachable") is False:
+        st.warning(
+            f"⚠️ **Search Service Unreachable ({search_status.get('provider', 'searxng').upper()})**: "
+            f"{search_status.get('message') or 'Cannot connect to SearXNG.'}\n\n"
+            "Ensure Docker Desktop and the `searxng` container are running (`docker start searxng`) before submitting queries.",
+            icon="⚠️",
+        )
 
 st.divider()
 
@@ -199,6 +208,13 @@ if user_prompt:
 
                     if event_type == "started":
                         status_box.update(label="🚀 GST Legal Research Pipeline Active...", state="running")
+
+                    elif event_type == "heartbeat":
+                        elapsed_s = event_data.get("elapsed_s", 0)
+                        status_box.update(
+                            label=f"⏳ Researching GST sources & drafting advisory ({elapsed_s}s)...",
+                            state="running",
+                        )
 
                     elif event_type == "step":
                         node = event_data.get("node", "")

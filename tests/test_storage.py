@@ -81,3 +81,12 @@ def test_source_cache_storage():
         cached_bytes, meta = retrieved
         assert cached_bytes == content
         assert meta["url"] == url
+
+        recent = storage.get_recent_document_by_url(url, max_age_seconds=3600)
+        assert recent is not None
+        recent_bytes, recent_meta, recent_path = recent
+        assert recent_bytes == content
+        assert recent_meta["hash"] == sha
+        assert recent_path.exists()
+
+        assert storage.get_recent_document_by_url(url, max_age_seconds=0) is None

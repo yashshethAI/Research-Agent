@@ -70,6 +70,11 @@ async def health_check() -> dict:
         r_llm_ok, r_llm_msg = llm_ok, f"LLM endpoint reachable. Model: {research_llm_factory.model_name}" if llm_ok else llm_msg
 
     search_ok, search_msg = await _check_search_health()
+    if settings.is_search_configured and not search_ok:
+        logger.warning(f"Health check degraded - search unavailable: {search_msg}")
+    if llm_factory.is_configured() and not llm_ok:
+        logger.warning(f"Health check degraded - LLM unavailable: {llm_msg}")
+
     return {
         "status": "healthy",
         "app_name": settings.APP_NAME,
@@ -111,6 +116,8 @@ async def config_status() -> ConfigStatusResponse:
         data_writable = False
 
     search_ok, search_msg = await _check_search_health()
+    if settings.is_search_configured and not search_ok:
+        logger.warning(f"Config status degraded - search unavailable: {search_msg}")
 
     return ConfigStatusResponse(
         app_name=settings.APP_NAME,
@@ -124,6 +131,9 @@ async def config_status() -> ConfigStatusResponse:
         search_provider=settings.SEARCH_PROVIDER,
         search_reachable=search_ok,
         search_base_url=settings.SEARXNG_BASE_URL if settings.SEARCH_PROVIDER == "searxng" else None,
+        search_fallback_engines=settings.SEARXNG_FALLBACK_ENGINES if settings.SEARCH_PROVIDER == "searxng" else None,
+        search_cache_ttl_seconds=settings.SEARCH_CACHE_TTL_SECONDS,
+        source_cache_ttl_seconds=settings.SOURCE_CACHE_TTL_SECONDS,
         search_status_message=search_msg,
         official_domains_count=len(settings.official_domains),
         verified_secondary_domains_count=len(settings.verified_secondary_domains),

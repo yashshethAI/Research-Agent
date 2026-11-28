@@ -9,6 +9,8 @@ def test_settings_default_values():
     assert s.APP_PORT == 8000
     assert s.STREAMLIT_PORT == 8501
     assert s.LLM_TIMEOUT == 180
+    assert s.LLM_REASONING_EFFORT == "low"
+    assert s.RESEARCH_LLM_REASONING_EFFORT == "none"
     assert s.SEARCH_PROVIDER == "searxng"
     assert s.SEARXNG_BASE_URL == "http://localhost:8080"
     assert s.SEARXNG_TIMEOUT == 30
@@ -17,8 +19,11 @@ def test_settings_default_values():
     assert s.MAX_EVIDENCE_SOURCES_FOR_LLM == 5
     assert s.ALLOW_UNVERIFIED_FALLBACK is False
     assert s.SEARXNG_ENGINES == "bing,yahoo"
+    assert s.SEARXNG_FALLBACK_ENGINES == "duckduckgo,startpage;brave,mojeek"
     assert s.SEARXNG_USE_SITE_OPERATORS is False
+    assert s.SEARCH_CACHE_TTL_SECONDS == 3600
     assert s.MAX_SOURCE_SIZE_MB == 20
+    assert s.SOURCE_CACHE_TTL_SECONDS == 21600
     assert s.MAX_SEARCH_RESULTS == 20
     assert s.MAX_FETCH_SOURCES == 8
 
