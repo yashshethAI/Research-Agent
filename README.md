@@ -138,6 +138,8 @@ cp .env.example .env
 | `LLM_API_KEY` | Optional API token for inference server | *(Empty or `none`)* |
 | `LLM_MODEL` | Served model name | `default` |
 | `LLM_TEMPERATURE` | Generation temperature | `0.0` |
+| `LLM_MAX_TOKENS` | Max completion tokens for Answer Generation LLM | `4096` |
+| `RESEARCH_LLM_MAX_TOKENS` | Max completion tokens for Query Planner LLM | `700` |
 | `LLM_REASONING_EFFORT` | Reasoning effort passed to thinking models (`none`, `low`, `medium`) | `low` |
 | `RESEARCH_LLM_REASONING_EFFORT` | Reasoning effort for query planner (`understand_query`) | `none` |
 | `SEARCH_PROVIDER` | Search adapter (`searxng` or `mock`) | `searxng` |

@@ -124,15 +124,21 @@ def test_research_llm_factory_uses_research_overrides_and_falls_back(monkeypatch
     assert main_factory.model_name == "qwen3:14b"
 
 
-def test_factory_passes_reasoning_effort_to_chat_model(monkeypatch):
+def test_factory_passes_reasoning_effort_and_max_tokens_to_chat_model(monkeypatch):
     monkeypatch.setattr(settings, "LLM_BASE_URL", "http://main-llm:8000/v1")
+    monkeypatch.setattr(settings, "LLM_MAX_TOKENS", 4096)
+    monkeypatch.setattr(settings, "RESEARCH_LLM_MAX_TOKENS", 700)
     monkeypatch.setattr(settings, "LLM_REASONING_EFFORT", "low")
     monkeypatch.setattr(settings, "RESEARCH_LLM_REASONING_EFFORT", "none")
 
     answer_model = LLMFactory().get_chat_model()
     planner_model = research_llm_factory.get_chat_model()
+    override_model = LLMFactory().get_chat_model(reasoning_effort="none")
     assert answer_model.reasoning_effort == "low"
+    assert answer_model.max_tokens == 4096
     assert planner_model.reasoning_effort == "none"
+    assert planner_model.max_tokens == 700
+    assert override_model.reasoning_effort == "none"
 
 
 @pytest.mark.asyncio

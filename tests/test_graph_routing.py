@@ -298,19 +298,26 @@ async def test_synthesize_answer_caps_prompt_evidence_budget(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_synthesize_answer_adjusts_max_tokens_for_reasoning_effort(monkeypatch):
+async def test_synthesize_answer_retries_with_none_on_empty_reasoning_output(monkeypatch):
     from backend.app.core.config import settings
 
     monkeypatch.setattr(llm_factory, "is_configured", lambda: True)
-    seen_max_tokens: list[int | None] = []
+    monkeypatch.setattr(settings, "LLM_REASONING_EFFORT", "low")
+    calls: list[str | None] = []
 
-    class _FakeStreamingLLM:
+    class _EmptyReasoningLLM:
+        async def astream(self, messages):
+            yield SimpleNamespace(content="", additional_kwargs={"reasoning_content": "thinking..."})
+
+    class _DirectAnswerLLM:
         async def astream(self, messages):
             yield SimpleNamespace(content="- [PERMITTED] Covered under [SRC-001].")
 
-    def fake_get_chat_model(max_tokens=None):
-        seen_max_tokens.append(max_tokens)
-        return _FakeStreamingLLM()
+    def fake_get_chat_model(max_tokens=None, reasoning_effort=None):
+        calls.append(reasoning_effort)
+        if reasoning_effort == "none":
+            return _DirectAnswerLLM()
+        return _EmptyReasoningLLM()
 
     monkeypatch.setattr(llm_factory, "get_chat_model", fake_get_chat_model)
 
@@ -331,9 +338,12 @@ async def test_synthesize_answer_adjusts_max_tokens_for_reasoning_effort(monkeyp
         ],
     )
 
-    monkeypatch.setattr(settings, "LLM_REASONING_EFFORT", "low")
-    await synthesize_answer_node(state)
-    monkeypatch.setattr(settings, "LLM_REASONING_EFFORT", "none")
-    await synthesize_answer_node(state)
+    out = await synthesize_answer_node(state)
+    assert calls == [None, "none"]
+    assert "[PERMITTED]" in out["final_report"]
 
-    assert seen_max_tokens == [2200, 1500]
+    # If even fallback returns empty, returns explicit error report instead of blank string
+    monkeypatch.setattr(llm_factory, "get_chat_model", lambda max_tokens=None, reasoning_effort=None: _EmptyReasoningLLM())
+    err_out = await synthesize_answer_node(state)
+    assert "Error Generating GST Advisory" in err_out["final_report"]
+    assert any(e["node"] == "synthesize_answer" for e in err_out["node_errors"])

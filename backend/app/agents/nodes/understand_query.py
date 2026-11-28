@@ -191,7 +191,7 @@ async def understand_query_node(state: ResearchState) -> dict[str, Any]:
             prompt = f"/no_think\n{prompt}"
 
         try:
-            llm = research_llm_factory.get_chat_model(max_tokens=700)
+            llm = research_llm_factory.get_chat_model()
             raw_text = await invoke_llm_with_streaming(
                 llm,
                 [

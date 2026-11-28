@@ -186,19 +186,32 @@ async def synthesize_answer_node(state: ResearchState) -> dict[str, Any]:
         )
 
         try:
-            effort = (llm_factory.reasoning_effort or "").lower()
-            answer_max_tokens = 1500 if effort in ("", "none") else 2200
-            llm = llm_factory.get_chat_model(max_tokens=answer_max_tokens)
-            raw_content = await invoke_llm_with_streaming(
-                llm,
-                [
-                    SystemMessage(content=GST_RESEARCHER_SYSTEM_PROMPT),
-                    HumanMessage(content=prompt),
-                ],
-            )
+            messages = [
+                SystemMessage(content=GST_RESEARCHER_SYSTEM_PROMPT),
+                HumanMessage(content=prompt),
+            ]
+            llm = llm_factory.get_chat_model()
+            raw_content = await invoke_llm_with_streaming(llm, messages)
             content_text, think_chars = strip_thinking_tags(raw_content)
             if think_chars:
                 logger.info(f"Stripped {think_chars} chars of <think> tags from Call #2 response")
+
+            effort = (llm_factory.reasoning_effort or "").lower()
+            if not content_text.strip() and effort not in ("", "none"):
+                logger.warning(
+                    f"Call #2 returned empty content with reasoning_effort={effort!r}; retrying with reasoning_effort='none'."
+                )
+                try:
+                    retry_llm = llm_factory.get_chat_model(reasoning_effort="none")
+                except TypeError:
+                    retry_llm = llm_factory.get_chat_model()
+                raw_content = await invoke_llm_with_streaming(retry_llm, messages)
+                content_text, think_chars = strip_thinking_tags(raw_content)
+                if think_chars:
+                    logger.info(f"Stripped {think_chars} chars of <think> tags from Call #2 retry response")
+
+            if not content_text.strip():
+                raise RuntimeError("LLM returned empty response (reasoning likely exhausted max_tokens)")
 
             dur = int((time.perf_counter() - t0) * 1000)
             trace.append(make_trace_entry(

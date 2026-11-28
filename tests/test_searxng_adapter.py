@@ -730,3 +730,56 @@ async def test_searxng_persistent_disk_cache_survives_memory_clear(monkeypatch, 
     assert calls == 1
     assert len(res2) == 1
     assert res2[0].url == "https://www.cbic.gov.in/cached.pdf"
+
+
+@pytest.mark.asyncio
+async def test_retrieve_evidence_ignores_portal_utility_urls_for_early_stop(monkeypatch):
+    monkeypatch.setattr(settings, "SEARCH_PROVIDER", "searxng")
+    monkeypatch.setattr(settings, "SEARXNG_BASE_URL", "http://localhost:8080")
+    monkeypatch.setattr(settings, "SEARXNG_USE_SITE_OPERATORS", False)
+    queries_called: list[str] = []
+
+    async def mock_search(self, query, domains=None, max_results=10, time_range=None):
+        queries_called.append(query)
+        if len(queries_called) == 1:
+            return [
+                SearchResult(title="GST Home", url="https://www.gst.gov.in/", snippet="Home", domain="www.gst.gov.in", score=9.0),
+                SearchResult(title="Login", url="https://services.gst.gov.in/services/login", snippet="Login", domain="services.gst.gov.in", score=8.0),
+                SearchResult(title="SearchTP", url="https://services.gst.gov.in/services/searchtp", snippet="Search", domain="services.gst.gov.in", score=7.0),
+                SearchResult(title="Payment", url="https://payment.gst.gov.in/payment/", snippet="Pay", domain="payment.gst.gov.in", score=6.0),
+                SearchResult(title="Reg", url="https://reg.gst.gov.in/registration/", snippet="Reg", domain="reg.gst.gov.in", score=5.0),
+            ]
+        return [
+            SearchResult(
+                title="E-Invoicing Notification",
+                url="https://www.cbic.gov.in/notifications/einvoice-rule48.pdf",
+                snippet="Rule 48(4) e-invoicing threshold",
+                domain="www.cbic.gov.in",
+                score=8.0,
+            )
+        ]
+
+    async def mock_fetch(url: str, allow_unverified: bool = False):
+        return FetchedDocument(
+            url=url,
+            content=b"<html><body><h1>Rule 48(4)</h1><p>E-invoicing applies when aggregate turnover exceeds Rs 5 crore.</p></body></html>",
+            content_type="text/html",
+            status_code=200,
+            sha256_hash="einvoicehash",
+            file_path="",
+        )
+
+    monkeypatch.setattr(SearXNGSearchAdapter, "search", mock_search)
+    monkeypatch.setattr(source_validator, "validate_url", lambda url, allow_unverified=False: (True, "ok"))
+    monkeypatch.setattr(safe_fetcher, "fetch", mock_fetch)
+
+    state = ResearchState(
+        query="Is e-invoicing applicable?",
+        search_queries=["e-invoicing GST threshold", "Rule 48(4) CBIC notification"],
+        search_tier="official",
+    )
+    out = await retrieve_evidence_node(state)
+
+    assert len(queries_called) == 2
+    assert len(out["evidence_records"]) == 1
+    assert out["evidence_records"][0]["url"] == "https://www.cbic.gov.in/notifications/einvoice-rule48.pdf"

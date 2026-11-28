@@ -90,9 +90,32 @@ _NON_CONTENT_PORTAL_PATHS = (
     "/gst-number-search",
     "/registration/",
     "/payment/",
+    "/help/returns",
     "/login",
     "/signin",
 )
+
+_PORTAL_HOMEPAGE_HOSTS = frozenset({
+    "gst.gov.in",
+    "www.gst.gov.in",
+    "services.gst.gov.in",
+    "einvoice1.gst.gov.in",
+    "cbic.gov.in",
+    "www.cbic.gov.in",
+    "taxinformation.cbic.gov.in",
+})
+
+
+def is_utility_or_homepage_url(url: str) -> bool:
+    """Returns True for generic portal homepages and login/payment/searchtp utility links."""
+    parsed = urlparse((url or "").strip())
+    host = (parsed.hostname or "").lower()
+    path = (parsed.path or "").lower()
+    if any(p.rstrip("/") in path for p in _NON_CONTENT_PORTAL_PATHS):
+        return True
+    if host in _PORTAL_HOMEPAGE_HOSTS and path in ("", "/"):
+        return True
+    return False
 
 _BOT_BLOCK_MARKERS = (
     "cf-browser-verification",

@@ -164,6 +164,14 @@ async def chat_stream_endpoint(request: ChatRequest) -> StreamingResponse:
                     except asyncio.CancelledError:
                         pass
 
+            if not (final_report or "").strip() and not needs_clarification:
+                logger.warning(f"Stream completed with empty answer (conv={conv_id[:8]} res={res_id[:8]})")
+                final_report = (
+                    "### Error Generating GST Advisory\n\n"
+                    "The research pipeline completed without generating text. "
+                    "Please retry your query or check `LLM_MAX_TOKENS` / `LLM_REASONING_EFFORT` in `.env`."
+                )
+
             complete_event = {
                 "event": "complete",
                 "conversation_id": conv_id,

@@ -9,6 +9,8 @@ def test_settings_default_values():
     assert s.APP_PORT == 8000
     assert s.STREAMLIT_PORT == 8501
     assert s.LLM_TIMEOUT == 180
+    assert s.LLM_MAX_TOKENS == 4096
+    assert s.RESEARCH_LLM_MAX_TOKENS == 700
     assert s.LLM_REASONING_EFFORT == "low"
     assert s.RESEARCH_LLM_REASONING_EFFORT == "none"
     assert s.SEARCH_PROVIDER == "searxng"

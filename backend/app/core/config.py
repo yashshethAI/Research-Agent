@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.0
     LLM_TIMEOUT: int = 180
     LLM_MAX_RETRIES: int = 2
+    LLM_MAX_TOKENS: int = 4096
     LLM_REASONING_EFFORT: str | None = "low"
 
     # Optional Separate OpenAI-Compatible LLM for Query Understanding (falls back to LLM_* if unset)
@@ -42,6 +43,7 @@ class Settings(BaseSettings):
     RESEARCH_LLM_TEMPERATURE: float | None = None
     RESEARCH_LLM_TIMEOUT: int | None = None
     RESEARCH_LLM_MAX_RETRIES: int | None = None
+    RESEARCH_LLM_MAX_TOKENS: int | None = 700
     RESEARCH_LLM_REASONING_EFFORT: str | None = "none"
 
     # Web Search (Local-First SearXNG)

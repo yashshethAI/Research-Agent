@@ -120,6 +120,11 @@ class LLMFactory:
         return int(val if val is not None else settings.LLM_MAX_RETRIES)
 
     @property
+    def max_tokens(self) -> int | None:
+        val = self._get_setting("LLM_MAX_TOKENS")
+        return int(val) if val is not None else None
+
+    @property
     def reasoning_effort(self) -> str | None:
         val = self._get_setting("LLM_REASONING_EFFORT")
         if isinstance(val, str) and val.strip():
@@ -163,7 +168,11 @@ class LLMFactory:
         except Exception as e:
             return False, f"LLM health check failed: {e!s}"
 
-    def get_chat_model(self, max_tokens: int | None = None) -> BaseChatModel:
+    def get_chat_model(
+        self,
+        max_tokens: int | None = None,
+        reasoning_effort: str | None = None,
+    ) -> BaseChatModel:
         """Returns an instance of ChatOpenAI pointed at the configured OpenAI-compatible endpoint."""
         if not self.is_configured():
             raise LLMNotConfiguredError(
@@ -174,6 +183,13 @@ class LLMFactory:
                 "  LLM_API_KEY=none                      # (if authentication is not required)\n"
             )
 
+        effective_max_tokens = max_tokens if max_tokens is not None else self.max_tokens
+        effective_reasoning = (
+            reasoning_effort.strip()
+            if isinstance(reasoning_effort, str)
+            else self.reasoning_effort
+        )
+
         kwargs: dict[str, Any] = {
             "base_url": self.base_url,
             "api_key": self.api_key,
@@ -183,10 +199,10 @@ class LLMFactory:
             "max_retries": self.max_retries,
             "default_headers": self.get_default_headers(),
         }
-        if self.reasoning_effort:
-            kwargs["reasoning_effort"] = self.reasoning_effort
-        if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
+        if effective_reasoning:
+            kwargs["reasoning_effort"] = effective_reasoning
+        if effective_max_tokens is not None:
+            kwargs["max_tokens"] = effective_max_tokens
 
         return ChatOpenAI(**kwargs)
 
@@ -195,7 +211,11 @@ async def invoke_llm_with_streaming(llm: Any, messages: list[Any]) -> str:
     """Streams tokens when supported by the model to keep remote HTTP sockets alive, falling back to ainvoke."""
     if hasattr(llm, "astream"):
         parts: list[str] = []
+        saw_reasoning = False
         async for chunk in llm.astream(messages):
+            extra = getattr(chunk, "additional_kwargs", None) or {}
+            if extra.get("reasoning_content") or extra.get("reasoning"):
+                saw_reasoning = True
             content = getattr(chunk, "content", chunk)
             if isinstance(content, str) and content:
                 parts.append(content)
@@ -203,7 +223,12 @@ async def invoke_llm_with_streaming(llm: Any, messages: list[Any]) -> str:
                 for item in content:
                     if isinstance(item, dict) and isinstance(item.get("text"), str):
                         parts.append(item["text"])
-        return "".join(parts)
+        result = "".join(parts)
+        if not result.strip() and saw_reasoning:
+            logger.warning(
+                "LLM stream produced reasoning tokens only and empty visible content (likely hit max_tokens)."
+            )
+        return result
 
     response = await llm.ainvoke(messages)
     content = getattr(response, "content", response)

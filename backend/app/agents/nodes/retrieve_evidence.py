@@ -18,6 +18,7 @@ from backend.app.tools.evidence_extractor import (
     detect_bot_block,
     detect_spa_shell,
     is_evidence_sufficient,
+    is_utility_or_homepage_url,
     normalize_llm_search_queries,
     rerank_search_results,
 )
@@ -272,8 +273,11 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
         early_stop_threshold = 5
 
         for idx, q in enumerate(queries):
-            if len(raw_hits) >= early_stop_threshold:
-                logger.info(f"Early stop: {len(raw_hits)} hits already, skipping remaining queries")
+            substantive_hits = sum(1 for r in raw_hits if not is_utility_or_homepage_url(r.url))
+            if substantive_hits >= early_stop_threshold:
+                logger.info(
+                    f"Early stop: {substantive_hits} substantive hits already, skipping remaining queries"
+                )
                 break
 
             if idx > 0 and settings.SEARCH_PROVIDER == "searxng":
@@ -332,11 +336,13 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
                 tier_search_results.append({**r.model_dump(), "source_tier": real_tier})
         all_search_results = [*state.search_results, *tier_search_results]
 
-        # 5 & 6. Parallel fetch top candidates + parse
+        # 5 & 6. Parallel fetch top substantive candidates + parse
+        substantive_ranked = [r for r in ranked_hits if not is_utility_or_homepage_url(r.url)]
+        fetch_pool = substantive_ranked if substantive_ranked else ranked_hits
         max_fetch = settings.MAX_FETCH_SOURCES
         fetch_counts = {"fetched": 0, "spa_shell": 0, "snippet_only": 0, "playwright_rendered": 0}
         parsed_docs, spa_pending = await _fetch_and_parse_candidates(
-            ranked_hits[:max_fetch],
+            fetch_pool[:max_fetch],
             active_tier=active_tier,
             allow_unverified=allow_unverified,
             errors=errors,
@@ -345,8 +351,8 @@ async def retrieve_evidence_node(state: ResearchState) -> dict[str, Any]:
 
         # 6a. Backfill from remaining ranked hits if initial candidates failed/blocked
         usable_target = min(4, max_fetch)
-        if fetch_counts["fetched"] + len(spa_pending) < usable_target and len(ranked_hits) > max_fetch:
-            backfill_candidates = ranked_hits[max_fetch : max_fetch + _BACKFILL_BATCH_LIMIT]
+        if fetch_counts["fetched"] + len(spa_pending) < usable_target and len(fetch_pool) > max_fetch:
+            backfill_candidates = fetch_pool[max_fetch : max_fetch + _BACKFILL_BATCH_LIMIT]
             extra_docs, extra_spa = await _fetch_and_parse_candidates(
                 backfill_candidates,
                 active_tier=active_tier,
